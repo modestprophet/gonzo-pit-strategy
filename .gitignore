@@ -1,4 +1,5 @@
 .env
+.venv
 .specstory
 
 # Byte-compiled / optimized / DLL files
