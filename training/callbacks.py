@@ -1,1 +1,1 @@
-# metrics logging and other callbacks
+# metrics log and other callbacks
