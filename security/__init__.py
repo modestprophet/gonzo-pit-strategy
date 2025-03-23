@@ -8,7 +8,7 @@ services including databases, cloud providers, and APIs.
 from .vault import Multipass
 from .credentials import (
     DatabaseCredentials,
-    get_database_url
+    get_database_credentials
 )
 
 # Create a singleton multipass instance for the application
@@ -17,5 +17,5 @@ multipass = Multipass()
 __all__ = [
     'vault',
     'DatabaseCredentials',
-    'get_database_url'
+    'get_database_credentials'
 ]
