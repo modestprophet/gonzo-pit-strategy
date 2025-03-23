@@ -1,0 +1,22 @@
+{
+  "development": {
+    "drivername": "postgresql+psycopg2",
+    "host": "10.0.20.18",
+    "port": 5432,
+    "database": "f1db",
+    "pool_size": 5,
+    "max_overflow": 10,
+    "pool_timeout": 30,
+    "pool_recycle": 1800
+  },
+  "production": {
+    "drivername": "postgresql+psycopg2",
+    "host": "10.0.20.18",
+    "port": 5432,
+    "database": "f1db",
+    "pool_size": 10,
+    "max_overflow": 20,
+    "pool_timeout": 30,
+    "pool_recycle": 1800
+  }
+}

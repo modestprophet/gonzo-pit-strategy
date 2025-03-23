@@ -1,1 +1,48 @@
-# TODO:  SQLAlchemy base setup
+"""
+SQLAlchemy base models and session context management.
+
+This module provides the base model class and session context manager
+for database operations.
+"""
+
+import logging
+from contextlib import contextmanager
+from typing import Generator, TypeVar, Type, Optional, List, Any
+
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Session
+
+from .connection_pool import ConnectionPool
+
+logger = logging.getLogger(__name__)
+
+# Create base model class
+Base = declarative_base()
+
+# Type variable for models
+T = TypeVar('T', bound=Base)
+
+
+@contextmanager
+def db_session() -> Generator[Session, None, None]:
+    """Context manager for database sessions.
+
+    Yields:
+        An SQLAlchemy session
+
+    Example:
+        with db_session() as session:
+            users = session.query(User).all()
+    """
+    pool = ConnectionPool()
+    session = pool.get_session()
+    try:
+        yield session
+        session.commit()
+    except Exception as e:
+        logger.error(f"Database error: {str(e)}")
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
