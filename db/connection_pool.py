@@ -1,4 +1,3 @@
-# db/connection_pool.py
 """
 Database connection pool management.
 
@@ -6,7 +5,6 @@ This module provides a centralized connection pool for database operations,
 using SQLAlchemy's built-in connection pooling.
 """
 
-import logging
 from typing import Optional
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -16,7 +14,8 @@ from sqlalchemy.pool import QueuePool
 
 from .config import DatabaseConfig
 
-logger = logging.getLogger(__name__)
+from gonzo_pit_strategy.log.logger import get_console_logger
+logger = get_console_logger(__name__)
 
 
 class ConnectionPool:
@@ -66,7 +65,7 @@ class ConnectionPool:
             db_url,
             poolclass=QueuePool,
             **pool_options,
-            echo=False,  # Set to True for SQL query logging (development only)
+            echo=False,  # Set to True for SQL query logging (dev only)
         )
 
         # Create session factory
@@ -77,7 +76,6 @@ class ConnectionPool:
                 bind=self._engine
             )
         )
-
         logger.debug("Database engine and session factory created successfully")
 
     @property

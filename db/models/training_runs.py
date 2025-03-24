@@ -18,6 +18,7 @@ class TrainingRun(Base):
 
     __table_args__ = (
         CheckConstraint("status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')"),
+        {'schema': 'f1db'},
     )
 
     def __repr__(self):

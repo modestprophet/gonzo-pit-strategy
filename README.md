@@ -10,17 +10,21 @@ Forecasting Formula 1 Grand Prix Pitstops
 - **Versioning**: Git for code/models, PostgreSQL for data/metrics
 - **Scale**: <100MB datasets, single developer
 - **Config**: json files in config directory, .env file for APP_ENV (prod|dev) and initial secrets
+- **Logging**: stdout and postgres logging available
 
 ## Refined Project Structure
 
 ```text
+ ./
 ├──  .env
 ├──  .env.example
 ├──  .github/
 │   └──  TODO.md
 ├──  .gitignore
+├──  __init__.py
 ├──  config/
 │   ├──  config.py
+│   ├──  database.json
 │   ├──  inference.json
 │   ├──  logging.json
 │   ├──  model.json
@@ -28,20 +32,20 @@ Forecasting Formula 1 Grand Prix Pitstops
 ├──  data/
 │   ├──  processed/
 │   └──  raw/
-│       ├──  circuits_202503231047.tsv
-│       ├──  constructorresults_202503231048.tsv
-│       ├──  constructors_202503231048.tsv
-│       ├──  constructorstandings_202503231048.tsv
-│       ├──  drivers_202503231048.tsv
-│       ├──  driverstandings_202503231048.tsv
-│       ├──  laptimes_202503231048.tsv
-│       ├──  pitstops_202503231049.tsv
-│       ├──  qualifying_202503231049.tsv
-│       ├──  races_202503231049.tsv
-│       ├──  results_202503231049.tsv
-│       ├──  seasons_202503231050.tsv
-│       ├──  sprintresults_202503231050.tsv
-│       └──  status_202503231050.tsv
+│       ├──  circuits_202503231936.tsv
+│       ├──  constructorresults_202503231937.tsv
+│       ├──  constructors_202503231937.tsv
+│       ├──  constructorstandings_202503231937.tsv
+│       ├──  drivers_202503231937.tsv
+│       ├──  driverstandings_202503231938.tsv
+│       ├──  laptimes_202503231938.tsv
+│       ├──  pitstops_202503231938.tsv
+│       ├──  qualifying_202503231939.tsv
+│       ├──  races_202503231939.tsv
+│       ├──  results_202503231939.tsv
+│       ├──  seasons_202503231939.tsv
+│       ├──  sprintresults_202503231939.tsv
+│       └──  status_202503231939.tsv
 ├──  db/
 │   ├──  __init__.py
 │   ├──  base.py
@@ -53,16 +57,19 @@ Forecasting Formula 1 Grand Prix Pitstops
 │   │   └──  002_raw_data.sql
 │   ├──  models/
 │   │   ├──  __init__.py
-│   │   ├──  model_metrics.py
-│   │   ├──  training_data.py
-│   │   └──  trianing_run.py
+│   │   ├──  application_logs.py
+│   │   ├──  dataset_versions.py
+│   │   ├──  f1_models.py
+│   │   ├──  model_metadata.py
+│   │   ├──  training_metrics.py
+│   │   └──  training_runs.py
 │   ├──  raw_data_base_ddls.sql
 │   └──  repositiries/
 │       ├──  __init__.py
 │       ├──  base_repository.py
 │       ├──  data_repository.py
 │       └──  metrics_repository.py
-├──  gonzo-pit-strategy/
+├──  gonzo_pit_strategy/
 │   ├──  __init__.py
 │   ├──  cli/
 │   │   ├──  __init__.py
@@ -72,10 +79,12 @@ Forecasting Formula 1 Grand Prix Pitstops
 │   ├──  exceptions.py
 │   ├──  log/
 │   │   ├──  __init__.py
+│   │   ├──  db_logger.py
 │   │   └──  logger.py
 │   ├──  main.py
 │   └──  utils/
 │       ├──  __init__.py
+│       ├──  db_setup.py
 │       └──  db_utils.py
 ├──  inference/
 │   ├──  __init__.py
@@ -105,7 +114,6 @@ Forecasting Formula 1 Grand Prix Pitstops
 │   ├──  credentials.py
 │   └──  vault.py
 └──  training/
-    ├──  __init__.py
     ├──  callbacks.py
     ├──  data_loader.py
     ├──  evaluation.py

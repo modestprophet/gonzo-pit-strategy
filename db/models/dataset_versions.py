@@ -20,6 +20,7 @@ class DatasetVersion(Base):
 
     __table_args__ = (
         UniqueConstraint('dataset_name', 'version', name='uix_dataset_name_version'),
+        {'schema': 'f1db'},
     )
 
     def __repr__(self):

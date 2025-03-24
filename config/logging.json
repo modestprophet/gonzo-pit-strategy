@@ -1,1 +1,27 @@
-{"purpose": "logging configuration"}
+{
+  "console": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  },
+  "database": {
+    "level": "INFO",
+    "enabled": true
+  },
+  "root": {
+    "level": "INFO"
+  },
+  "loggers": {
+    "gonzo_pit_strategy": {
+      "level": "DEBUG"
+    },
+    "db": {
+      "level": "DEBUG"
+    },
+    "inference": {
+      "level": "INFO"
+    },
+    "training": {
+      "level": "INFO"
+    }
+  }
+}

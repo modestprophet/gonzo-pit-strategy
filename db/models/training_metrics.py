@@ -16,6 +16,7 @@ class TrainingMetric(Base):
 
     __table_args__ = (
         CheckConstraint("split_type IN ('TRAIN', 'VALIDATION', 'TEST')"),
+        {'schema': 'f1db'},
     )
 
     def __repr__(self):

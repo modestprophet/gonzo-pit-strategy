@@ -18,8 +18,9 @@ class ApplicationLog(Base):
 
     __table_args__ = (
         CheckConstraint("level IN ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')"),
-        Index('idx_app_logs_timestamp', timestamp),
-        Index('idx_app_logs_level', level),
+        Index('idx_app_logs_timestamp', 'timestamp'),
+        Index('idx_app_logs_level', 'level'),
+        {'schema': 'f1db'},
     )
 
     def __repr__(self):

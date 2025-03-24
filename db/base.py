@@ -4,17 +4,17 @@ SQLAlchemy base models and session context management.
 This module provides the base model class and session context manager
 for database operations.
 """
-
-import logging
 from contextlib import contextmanager
-from typing import Generator, TypeVar, Type, Optional, List, Any
+from typing import Generator, TypeVar
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session
 
 from .connection_pool import ConnectionPool
 
-logger = logging.getLogger(__name__)
+from gonzo_pit_strategy.log.logger import get_console_logger
+logger = get_console_logger(__name__)
+
 
 # Create base model class
 Base = declarative_base()

@@ -26,17 +26,12 @@ Options:
 import os
 import sys
 import argparse
-import logging
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Dict
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("db_setup")
+from gonzo_pit_strategy.log.logger import get_console_logger
+logger = get_console_logger("db_setup")
+
 
 # Project structure
 PROJECT_ROOT = Path(__file__).parent.parent.parent

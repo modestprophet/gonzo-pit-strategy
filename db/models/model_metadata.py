@@ -22,6 +22,7 @@ class ModelMetadata(Base):
 
     __table_args__ = (
         UniqueConstraint('name', 'version', name='uix_name_version'),
+        {'schema': 'f1db'},
     )
 
     def __repr__(self):
