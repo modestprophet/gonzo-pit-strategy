@@ -1,30 +1,32 @@
--- Create database if it does not exist
-DO
-$$
-BEGIN
-   IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'f1db') THEN
-      CREATE DATABASE f1db;
-   END IF;
-END
-$$;
+-- db/init_db.sql
+-- SQL template for initializing F1 database
+-- {{DB_NAME}} will be replaced with the actual database name
+-- {{APP_USERNAME}} will be replaced with the application username
+-- {{APP_PASSWORD}} will be replaced with the application password
 
--- Create schema if it doesn't exist
+-- Create database if it doesn't exist
+CREATE DATABASE {{DB_NAME}};
+
+-- Connect to the database
+\c {{DB_NAME}}
+
+-- Create schema
 CREATE SCHEMA IF NOT EXISTS f1db;
 
--- Create application user if it doesn't exist
-DO
-$$
-BEGIN
-   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dbappuser') THEN
-      CREATE ROLE dbappuser WITH LOGIN PASSWORD 'securepassword';
-   END IF;
-END
-$$;
+-- Create application user
+DO $$BEGIN
+    IF NOT EXISTS (
+        SELECT FROM pg_catalog.pg_roles WHERE rolname = '{{APP_USERNAME}}'
+    ) THEN
+        CREATE USER {{APP_USERNAME}} WITH ENCRYPTED PASSWORD '{{APP_PASSWORD}}';
+    ELSE
+        ALTER USER {{APP_USERNAME}} WITH ENCRYPTED PASSWORD '{{APP_PASSWORD}}';
+    END IF;
+END$$;
 
 -- Grant privileges to application user
-GRANT CONNECT ON DATABASE f1db TO dbappuser;
-GRANT USAGE, CREATE ON SCHEMA f1db TO dbappuser;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA f1db TO dbappuser;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA f1db TO dbappuser;
-ALTER DEFAULT PRIVILEGES IN SCHEMA f1db GRANT ALL ON TABLES TO dbappuser;
-ALTER DEFAULT PRIVILEGES IN SCHEMA f1db GRANT ALL ON SEQUENCES TO dbappuser;
+GRANT USAGE ON SCHEMA f1db TO {{APP_USERNAME}};
+GRANT CONNECT ON DATABASE {{DB_NAME}} TO {{APP_USERNAME}};
+GRANT ALL PRIVILEGES ON SCHEMA f1db TO {{APP_USERNAME}};
+ALTER DEFAULT PRIVILEGES IN SCHEMA f1db GRANT ALL PRIVILEGES ON TABLES TO {{APP_USERNAME}};
+ALTER DEFAULT PRIVILEGES IN SCHEMA f1db GRANT ALL PRIVILEGES ON SEQUENCES TO {{APP_USERNAME}};

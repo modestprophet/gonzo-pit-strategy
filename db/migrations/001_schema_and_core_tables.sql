@@ -1,6 +1,6 @@
 -- +goose Up
 -- Application Logs
-CREATE TABLE application_logs (
+CREATE TABLE f1db.application_logs (
     log_id SERIAL PRIMARY KEY,
     timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     level VARCHAR(10) NOT NULL CHECK (level IN ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')),
@@ -15,7 +15,7 @@ CREATE INDEX idx_app_logs_timestamp ON application_logs(timestamp);
 CREATE INDEX idx_app_logs_level ON application_logs(level);
 
 -- Dataset Versions
-CREATE TABLE dataset_versions (
+CREATE TABLE f1db.dataset_versions (
     dataset_version_id SERIAL PRIMARY KEY,
     dataset_name VARCHAR(100) NOT NULL,
     version VARCHAR(50) NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE dataset_versions (
 );
 
 -- Model Metadata
-CREATE TABLE model_metadata (
+CREATE TABLE f1db.model_metadata (
     model_id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     version VARCHAR(50) NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE model_metadata (
 );
 
 -- Training Runs
-CREATE TABLE training_runs (
+CREATE TABLE f1db.training_runs (
     run_id SERIAL PRIMARY KEY,
     model_id INTEGER NOT NULL REFERENCES model_metadata(model_id) ON DELETE CASCADE,
     dataset_version_id INTEGER REFERENCES dataset_versions(dataset_version_id),
@@ -60,7 +60,7 @@ CREATE TABLE training_runs (
 );
 
 -- Training Metrics
-CREATE TABLE training_metrics (
+CREATE TABLE f1db.training_metrics (
     metric_id SERIAL PRIMARY KEY,
     run_id INTEGER NOT NULL REFERENCES training_runs(run_id) ON DELETE CASCADE,
     epoch INTEGER NOT NULL,
@@ -71,8 +71,8 @@ CREATE TABLE training_metrics (
 );
 
 -- +goose Down
-DROP TABLE IF EXISTS training_metrics;
-DROP TABLE IF EXISTS training_runs;
-DROP TABLE IF EXISTS model_metadata;
-DROP TABLE IF EXISTS dataset_versions;
-DROP TABLE IF EXISTS application_logs;
+DROP TABLE IF EXISTS f1db.training_metrics;
+DROP TABLE IF EXISTS f1db.training_runs;
+DROP TABLE IF EXISTS f1db.model_metadata;
+DROP TABLE IF EXISTS f1db.dataset_versions;
+DROP TABLE IF EXISTS f1db.application_logs;

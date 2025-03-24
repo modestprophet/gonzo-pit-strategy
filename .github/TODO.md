@@ -14,26 +14,38 @@ scripts/
 
 
 ```
+# .github/workflows/db-setup.yml
+name: Database Setup
+
+on:
+  workflow_dispatch:
+  
 jobs:
-  migrate-db:
+  setup-database:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Install PostgreSQL Client
-        run: sudo apt-get install -y postgresql-client
-
-      - name: Create Database and Schema
-        env:
-          PGPASSWORD: ${{ secrets.DB_SUPERUSER_PASSWORD }}
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
         run: |
-          psql -h ${{ secrets.DB_HOST }} -U ${{ secrets.DB_SUPERUSER }} -d postgres -f init_db.sql
-
-      - name: Run Goose Migrations
-        env:
-          PGPASSWORD: ${{ secrets.DBAPPPASS }}
+          python -m pip install --upgrade pip
+          pip install psycopg2-binary
+      - name: Install Goose Migration Tool
         run: |
-          goose -table=f1db.goose_db_version postgres "postgres://${{ secrets.DBAPPUSER }}:${{ secrets.DBAPPPASS }}@${{ secrets.DB_HOST }}:5432/f1db?sslmode=disable" up
-
+          wget -O goose.tar.gz https://github.com/pressly/goose/releases/download/v3.5.0/goose_linux_x86_64.tar.gz
+          tar -xzf goose.tar.gz
+          sudo mv goose /usr/local/bin/
+      - name: Set up database
+        run: |
+          python db_setup.py \
+            --db-admin-username ${{ secrets.DB_ADMIN_USERNAME }} \
+            --db-admin-password ${{ secrets.DB_ADMIN_PASSWORD }} \
+            --app-username ${{ secrets.DB_APP_USERNAME }} \
+            --app-password ${{ secrets.DB_APP_PASSWORD }} \
+            --db-host localhost \
+            --db-port 5432 \
+            --db-name f1db
 ```
