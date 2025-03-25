@@ -22,6 +22,9 @@
     },
     "training": {
       "level": "INFO"
+    },
+    "security": {
+      "level": "DEBUG"
     }
   }
 }

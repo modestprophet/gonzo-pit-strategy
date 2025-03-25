@@ -5,7 +5,6 @@ authentication, secret retrieval, and renewal of credentials.
 """
 
 import os
-import logging
 import hvac
 from hvac import exceptions
 from pathlib import Path
@@ -13,7 +12,9 @@ from dotenv import load_dotenv
 from functools import wraps
 from typing import Optional, Dict, List, Any
 
-logger = logging.getLogger(__name__)
+from gonzo_pit_strategy.log.logger import get_console_logger
+
+logger = get_console_logger(__name__)
 
 
 class VaultError(Exception):

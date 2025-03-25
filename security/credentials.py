@@ -4,12 +4,13 @@ This module provides structured credential objects for databases, cloud services
 and APIs, with methods to format them for different use cases.
 """
 
-import logging
 from dataclasses import dataclass
 from typing import Dict, Any
 from .vault import Multipass, VaultSecretError
 
-logger = logging.getLogger(__name__)
+from gonzo_pit_strategy.log.logger import get_console_logger
+
+logger = get_console_logger(__name__)
 
 
 @dataclass
