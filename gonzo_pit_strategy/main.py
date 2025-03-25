@@ -1,22 +1,8 @@
-import traceback
-from log import get_console_logger, get_db_logger
+from db.repositiries.data_repository import F1DataRepository
 
 def main():
-    logger = get_console_logger("example_component")
-
-    logger.info("This is an informational message")
-    logger.warning("This is a warning message")
-    logger.error("This is an error message")
-
-    db_logger = get_db_logger("db_component")
-    db_logger.info("This only goes to the database")
-
-    try:
-        # Simulate an error
-        x = 1 / 0
-    except Exception as e:
-        stack_trace = traceback.format_exc()
-        db_logger.error(f"An error occurred: {str(e)}", stack_trace=stack_trace)
+    df = F1DataRepository.get_all_race_history()
+    df.to_csv('output.csv', index=False, header=True, sep=';', na_rep='NA', encoding='utf-8')
 
 
 if __name__ == "__main__":
