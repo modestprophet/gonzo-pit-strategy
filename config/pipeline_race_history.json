@@ -1,0 +1,56 @@
+{
+  "pipeline": {
+    "name": "f1_race_data_pipeline",
+    "version": "0.1.0",
+    "description": "Pipeline for processing F1 race data for pit stop strategy modeling",
+    "save_checkpoints": true,
+    "checkpoint_dir": "../../data/processed",
+    "checkpoint_format": "tsv",
+    "artifacts_dir": "../../models/artifacts",
+    "steps": [
+      {
+        "name": "null_value_cleaner",
+        "enabled": true,
+        "config": {
+          "strategy": "fill_custom",
+          "fill_values": {
+            "q1": "0:00.000",
+            "q2": "0:00.000",
+            "q3": "0:00.000",
+            "milliseconds": 0,
+            "fastestlaptime": 0,
+            "fastestlapspeed": 0
+          }
+        }
+      },
+      {
+        "name": "data_type_converter",
+        "enabled": true,
+        "config": {
+          "datetime_columns": ["racedate", "racetime"],
+          "numeric_columns": ["milliseconds", "points", "drivertotalpoints", "constructortotalpoints"]
+        }
+      },
+      {
+        "name": "categorical_encoder",
+        "enabled": true,
+        "config": {
+          "columns": ["circuitname", "constructorname", "drivercode", "status"],
+          "drop_original": true,
+          "drop_first": true,
+          "sparse_output": false,
+          "handle_unknown": "ignore"
+        }
+      },
+      {
+        "name": "numerical_scaler",
+        "enabled": true,
+        "config": {
+          "columns": ["qualifyingPosition", "startinggrid", "finishpositionOrder", "milliseconds",
+                     "points", "drivertotalpoints", "constructortotalpoints"],
+          "scaler": "standard"
+        }
+      }
+    ]
+  }
+}
