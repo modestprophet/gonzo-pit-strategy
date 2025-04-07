@@ -21,7 +21,7 @@
       "level": "INFO"
     },
     "training": {
-      "level": "INFO"
+      "level": "DEBUG"
     },
     "security": {
       "level": "DEBUG"

@@ -32,6 +32,13 @@
         }
       },
       {
+        "name": "qualifying_time_converter",
+        "enabled": true,
+        "config": {
+          "columns": ["q1", "q2", "q3"]
+        }
+      },
+      {
         "name": "categorical_encoder",
         "enabled": true,
         "config": {

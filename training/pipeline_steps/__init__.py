@@ -4,11 +4,13 @@ from .null_cleaner import NullValueCleaner
 from .type_converter import DataTypeConverter
 from .encoders import CategoricalEncoder
 from .scalers import NumericalScaler
+from .race_data_transforms import QualifyingTimeConverter
 
 __all__ = [
     'PipelineStep',
     'NullValueCleaner',
     'DataTypeConverter',
     'CategoricalEncoder',
-    'NumericalScaler'
+    'NumericalScaler',
+    'QualifyingTimeConverter'
 ]

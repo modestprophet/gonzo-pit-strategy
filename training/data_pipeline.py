@@ -22,7 +22,8 @@ from training.pipeline_steps import (
     NullValueCleaner,
     DataTypeConverter,
     CategoricalEncoder,
-    NumericalScaler
+    NumericalScaler,
+    QualifyingTimeConverter
 )
 
 logger = get_console_logger(__name__)
@@ -35,7 +36,8 @@ class DataPipeline:
         "null_value_cleaner": NullValueCleaner,
         "data_type_converter": DataTypeConverter,
         "categorical_encoder": CategoricalEncoder,
-        "numerical_scaler": NumericalScaler
+        "numerical_scaler": NumericalScaler,
+        "qualifying_time_converter": QualifyingTimeConverter
     }
 
     def __init__(self, config_path: str = "../../config/pipeline.json"):
