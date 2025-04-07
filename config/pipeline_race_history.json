@@ -9,7 +9,7 @@
     "artifacts_dir": "../../models/artifacts",
     "steps": [
       {
-        "name": "null_value_cleaner",
+        "name": "nullvaluecleaner",
         "enabled": true,
         "config": {
           "strategy": "fill_custom",
@@ -24,7 +24,7 @@
         }
       },
       {
-        "name": "data_type_converter",
+        "name": "datatypeconverter",
         "enabled": true,
         "config": {
           "datetime_columns": ["racedate", "racetime"],
@@ -32,14 +32,14 @@
         }
       },
       {
-        "name": "qualifying_time_converter",
+        "name": "qualifyingtimeconverter",
         "enabled": true,
         "config": {
           "columns": ["q1", "q2", "q3"]
         }
       },
       {
-        "name": "categorical_encoder",
+        "name": "categoricalencoder",
         "enabled": true,
         "config": {
           "columns": ["circuitname", "constructorname", "drivercode", "status"],
@@ -50,7 +50,7 @@
         }
       },
       {
-        "name": "numerical_scaler",
+        "name": "numericalscaler",
         "enabled": true,
         "config": {
           "columns": ["qualifyingPosition", "startinggrid", "finishpositionOrder", "milliseconds",

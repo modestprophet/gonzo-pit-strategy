@@ -16,29 +16,13 @@ from db.base import db_session
 from db.models.dataset_versions import DatasetVersion
 from db.repositiries.data_repository import F1DataRepository
 from gonzo_pit_strategy.log.logger import get_console_logger
-
-# Import pipeline steps
-from training.pipeline_steps import (
-    NullValueCleaner,
-    DataTypeConverter,
-    CategoricalEncoder,
-    NumericalScaler,
-    QualifyingTimeConverter
-)
+from training.pipeline_steps.base_step import PipelineStep
 
 logger = get_console_logger(__name__)
 
 
 class DataPipeline:
     """Main data processing pipeline."""
-
-    STEP_CLASSES = {
-        "null_value_cleaner": NullValueCleaner,
-        "data_type_converter": DataTypeConverter,
-        "categorical_encoder": CategoricalEncoder,
-        "numerical_scaler": NumericalScaler,
-        "qualifying_time_converter": QualifyingTimeConverter
-    }
 
     def __init__(self, config_path: str = "../../config/pipeline.json"):
         """Initialize the data pipeline.
@@ -63,7 +47,7 @@ class DataPipeline:
         logger.info(f"Initialized {self.name} pipeline v{self.version} with {len(self.steps)} steps")
 
     def _init_steps(self):
-        """Initialize pipeline steps from configuration."""
+        """Initialize pipeline steps from configuration using the registry."""
         step_configs = self.config.get('steps', [])
 
         for step_config in step_configs:
@@ -74,11 +58,12 @@ class DataPipeline:
                 logger.debug(f"Skipping disabled step: {step_name}")
                 continue
 
-            if step_name not in self.STEP_CLASSES:
+            if step_name not in PipelineStep.registry:
                 logger.warning(f"Unknown step type: {step_name}, skipping")
+                logger.warning((f"Pipeline registry contains: {PipelineStep.registry}"))
                 continue
 
-            step_class = self.STEP_CLASSES[step_name]
+            step_class = PipelineStep.registry[step_name]
             step = step_class(step_config.get('config', {}))
             self.steps.append(step)
             logger.debug(f"Added step: {step_name}")

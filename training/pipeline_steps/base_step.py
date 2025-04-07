@@ -8,13 +8,24 @@ import pandas as pd
 class PipelineStep:
     """Base class for all data pipeline steps."""
 
+    # Registry to store all pipeline step classes
+    registry = {}
+
+    def __init_subclass__(cls, **kwargs):
+        """Register all subclasses automatically."""
+        super().__init_subclass__(**kwargs)
+        step_name = cls.__name__.lower()
+        if hasattr(cls, 'step_name'):
+            step_name = cls.step_name
+        cls.registry[step_name] = cls
+
     def __init__(self, config: Dict[str, Any]):
         """Initialize the pipeline step with configuration.
 
         Args:
             config: Dictionary containing step configuration
         """
-        self.config = config
+        self.config = config or {}
         self.name = self.__class__.__name__
 
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
