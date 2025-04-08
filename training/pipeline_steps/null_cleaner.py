@@ -9,6 +9,7 @@ logger = get_console_logger(__name__)
 
 class NullValueCleaner(PipelineStep):
     """Pipeline step for handling null/missing values."""
+    step_name = "null_value_cleaner"
 
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         """Clean null values from dataframe.

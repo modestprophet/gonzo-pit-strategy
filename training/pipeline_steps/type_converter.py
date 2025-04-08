@@ -8,6 +8,7 @@ logger = get_console_logger(__name__)
 
 class DataTypeConverter(PipelineStep):
     """Pipeline step for converting data types."""
+    step_name = "data_type_converter"
 
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         """Convert columns to appropriate data types.

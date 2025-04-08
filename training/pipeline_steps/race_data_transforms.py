@@ -18,6 +18,7 @@ def z_clip_cols(col):
 
 class QualifyingTimeConverter(PipelineStep):
     """Pipeline step to convert qualifying times to seconds."""
+    step_name = "qualifying_time_converter"
 
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         """Convert qualifying time columns to seconds.

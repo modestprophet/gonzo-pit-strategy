@@ -14,7 +14,7 @@ class PipelineStep:
     def __init_subclass__(cls, **kwargs):
         """Register all subclasses automatically."""
         super().__init_subclass__(**kwargs)
-        step_name = cls.__name__.lower()
+        step_name = cls.__name__
         if hasattr(cls, 'step_name'):
             step_name = cls.step_name
         cls.registry[step_name] = cls

@@ -1,7 +1,7 @@
 """Pipeline step for scaling numerical features."""
 import os
 import pickle
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
 import pandas as pd
 import numpy as np
@@ -15,6 +15,7 @@ logger = get_console_logger(__name__)
 
 class NumericalScaler(PipelineStep):
     """Pipeline step for scaling numerical variables."""
+    step_name = "numerical_scaler"
 
     def __init__(self, config: Dict[str, Any]):
         """Initialize the scaler step.
@@ -66,7 +67,7 @@ class NumericalScaler(PipelineStep):
 
         # For each numeric column, create and apply a scaler
         for col in numeric_columns:
-            # Handle NaN values (important for scaling)
+            # Handle NaN values
             col_data = df[col].fillna(df[col].median())
 
             # Reshape for scikit-learn which expects 2D array

@@ -14,6 +14,7 @@ logger = get_console_logger(__name__)
 
 class CategoricalEncoder(PipelineStep):
     """Pipeline step for encoding categorical variables."""
+    step_name = "categorical_encoder"
 
     def __init__(self, config: Dict[str, Any]):
         """Initialize the encoder step.
