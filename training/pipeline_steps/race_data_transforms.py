@@ -1,6 +1,7 @@
 """Pipeline step for race history data specific transforms."""
 import pandas as pd
 import numpy as np
+from typing import List, Dict, Any
 from .base_step import PipelineStep
 from gonzo_pit_strategy.log.logger import get_console_logger
 
@@ -17,7 +18,17 @@ def z_clip_cols(col):
   return col
 
 class QualifyingTimeConverter(PipelineStep):
-    """Pipeline step to convert qualifying times to seconds."""
+    """
+    Converts qualifying time columns from string format to seconds.
+    Configurable Options:
+        - columns (List[str]): List of qualifying time columns to process (default: ['q1', 'q2', 'q3']).
+            These should be in 'M:S.fff' format (e.g., '1:23.456').
+
+    Creates:
+        For each qualifying time column:
+        - {col}_seconds: Numeric column containing the time in seconds
+        - {col}_missing: Binary indicator (1 = missing, 0 = present)
+        """
     step_name = "qualifying_time_converter"
 
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -50,3 +61,96 @@ class QualifyingTimeConverter(PipelineStep):
                 logger.warning(f"Column '{col}' not found in DataFrame. Skipping.")
 
         return df
+
+
+class LaggedFeatureGenerator(PipelineStep):
+    """
+    Generates lagged features based on grouping and sorting criteria.
+
+    This step shifts specified columns by a defined period within groups,
+    useful for creating features based on previous time steps (e.g., previous race results).
+
+    Configurable Options:
+        - lag_columns (List[str]): Columns to shift.
+        - group_columns (List[str]): Columns to group by before shifting.
+        - sort_column (str): Column to sort by within groups before shifting (e.g., 'roundnumber').
+        - shift_period (int): Number of periods to shift (default: 1). Positive shifts data backward (past values).
+        - fill_value (Any): Value to fill NaNs introduced by the shift (default: 0).
+        - new_col_prefix (str): Prefix for the newly created lagged columns (default: "lagged_").
+        - numeric_lagged_cols (List[str]): Original column names (subset of lag_columns) whose
+                                           lagged versions should be explicitly converted to numeric.
+    """
+    step_name = "lagged_feature_generator"
+
+    def process(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Applies the lagging operation to the DataFrame.
+
+        Args:
+            df: Input DataFrame.
+
+        Returns:
+            DataFrame with new lagged feature columns added.
+
+        Raises:
+            ValueError: If required configuration keys are missing.
+            KeyError: If specified columns are not found in the DataFrame.
+        """
+        lag_cols: List[str] = self.config.get("lag_columns")
+        group_cols: List[str] = self.config.get("group_columns")
+        sort_cols: str = self.config.get("sort_columns")
+        shift_period: int = self.config.get("shift_period", 1)
+        fill_value: Any = self.config.get("fill_value", 0)
+        new_col_prefix: str = self.config.get("new_col_prefix", "lagged_")
+        numeric_lagged_cols: List[str] = self.config.get("numeric_lagged_cols", [])
+
+        # --- Validation ---
+        if not lag_cols or not group_cols or not sort_cols:
+            msg = "Missing required config: 'lag_columns', 'group_columns', 'sort_column'"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        required_df_cols = set(lag_cols + group_cols + sort_cols)
+        missing_cols = required_df_cols - set(df.columns)
+        if missing_cols:
+            msg = f"DataFrame is missing required columns: {missing_cols}"
+            logger.error(msg)
+            raise KeyError(msg)
+        # --- End Validation ---
+
+        logger.info(
+            f"Generating {shift_period}-period lagged features for {lag_cols} "
+            f"grouped by {group_cols}, sorted by {sort_cols}."
+        )
+
+        # Create a copy to avoid SettingWithCopyWarning
+        df = df.copy()
+
+        # Sort the DataFrame by group and sort columns (using assignment instead of inplace)
+        df = df.sort_values(by=group_cols + sort_cols, kind='mergesort')
+
+        # Generate lagged columns directly in the DataFrame
+        for col in lag_cols:
+            new_col_name = f"{new_col_prefix}{col}"
+            # Assign shifted values directly
+            shifted_values = df.groupby(group_cols, observed=True, sort=False)[col].shift(shift_period)
+            df[new_col_name] = shifted_values.fillna(fill_value)
+
+            # Convert to numeric if specified
+            if col in numeric_lagged_cols:
+                df[new_col_name] = pd.to_numeric(df[new_col_name], errors='coerce').fillna(fill_value)
+                logger.debug(f"Ensured column '{new_col_name}' is numeric.")
+
+        logger.info(f"Generated lagged columns: {[f'{new_col_prefix}{col}' for col in lag_cols]}")
+        return df
+
+    def get_description(self) -> str:
+        """Get description including key config parameters."""
+        desc = (
+            f"{self.name}: "
+            f"lag_cols={self.config.get('lag_columns')}, "
+            f"group_cols={self.config.get('group_columns')}, "
+            f"sort_col={self.config.get('sort_column')}, "
+            f"shift={self.config.get('shift_period', 1)}"
+        )
+        return desc

@@ -51,11 +51,38 @@
       },
       {
         "name": "numerical_scaler",
-        "enabled": true,
+        "enabled": false,
         "config": {
           "columns": ["qualifyingPosition", "startinggrid", "finishpositionOrder", "milliseconds",
-                     "points", "drivertotalpoints", "constructortotalpoints"],
+            "points", "drivertotalpoints", "constructortotalpoints"],
           "scaler": "standard"
+        }
+      },
+      {
+        "name": "lagged_feature_generator",
+        "enabled": true,
+        "config": {
+          "lag_columns": [
+            "points",
+            "drivertotalpoints",
+            "driverrank",
+            "driverwins",
+            "constructortotalpoints",
+            "constructorrank",
+            "constructorwins"
+          ],
+          "group_columns": [
+            "raceyear",
+            "driverid"
+          ],
+          "sort_columns": ["roundnumber"],
+          "shift_period": 1,
+          "fill_value": 0,
+          "new_col_prefix": "prev_race_",
+          "numeric_lagged_cols": [
+            "driverrank",
+            "constructorrank"
+          ]
         }
       }
     ]
