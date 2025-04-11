@@ -220,6 +220,7 @@ class DataPipeline:
             df = step.process(df)
             steps_applied.append(step.get_description())
             logger.info(f"Shape after {step.name}: {df.shape}")
+            logger.debug(f"Cols after step: {[f'{col}' for col in df.columns.tolist()]}")
 
         # Generate version if not provided
         if save_version is None:
