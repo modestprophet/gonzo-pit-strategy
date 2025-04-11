@@ -17,6 +17,18 @@ def z_clip_cols(col):
   col[col > upper_range] = upper_range
   return col
 
+
+class SeasonProgress(PipelineStep):
+    """
+    Calculates the round number as a percentage of the relative season complete
+    """
+    step_name = "season_progress"
+
+    def process(self, df: pd.DataFrame) -> pd.DataFrame:
+        df['season_progress_percent'] = df['roundnumber'] / df.groupby(['raceyear'])['roundnumber'].transform('max')
+        return df
+
+
 class QualifyingTimeConverter(PipelineStep):
     """
     Converts qualifying time columns from string format to seconds.

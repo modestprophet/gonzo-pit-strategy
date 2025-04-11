@@ -51,7 +51,7 @@
       },
       {
         "name": "numerical_scaler",
-        "enabled": false,
+        "enabled": true,
         "config": {
           "columns": ["qualifyingPosition", "startinggrid", "finishpositionOrder", "milliseconds",
             "points", "drivertotalpoints", "constructortotalpoints"],
@@ -84,6 +84,10 @@
             "constructorrank"
           ]
         }
+      },
+      {
+        "name": "season_progress",
+        "enabled": true
       }
     ]
   }
