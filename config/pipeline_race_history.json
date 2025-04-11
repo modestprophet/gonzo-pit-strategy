@@ -88,6 +88,23 @@
       {
         "name": "season_progress",
         "enabled": true
+      },
+      {
+  "name": "z_score_clipper",
+  "enabled": true,
+  "config": {
+    "z_threshold": 3.0,
+    "clipped_value": null,
+    "columns": [
+      "qualifyingPosition",
+      "startinggrid",
+      "finishpositionOrder",
+      "milliseconds",
+      "points",
+      "drivertotalpoints",
+      "constructortotalpoints"
+    ]
+        }
       }
     ]
   }

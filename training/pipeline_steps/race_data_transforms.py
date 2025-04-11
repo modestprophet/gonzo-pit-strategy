@@ -7,15 +7,6 @@ from gonzo_pit_strategy.log.logger import get_console_logger
 
 logger = get_console_logger(__name__)
 
-def z_clip_cols(col):
-  Q1 = col.quantile(0.25)
-  Q3 = col.quantile(0.75)
-  IQR = Q3 - Q1
-  lower_range = Q1 - (1.5 * IQR)
-  upper_range = Q3 + (1.5 * IQR)
-  col[col < lower_range] = lower_range
-  col[col > upper_range] = upper_range
-  return col
 
 
 class SeasonProgress(PipelineStep):
@@ -166,3 +157,61 @@ class LaggedFeatureGenerator(PipelineStep):
             f"shift={self.config.get('shift_period', 1)}"
         )
         return desc
+
+
+class ZScoreClipper(PipelineStep):
+    """Clip dataframe values above a certain Z-Score to remove outliers.
+
+    Configurable Options:
+        - columns (List[str]): List of columns to process (default: all numeric columns)
+        - z_threshold (float): Maximum Z-Score above which values should be clipped (default=3)
+        - clipped_value (Optional[float]): Replace outliers with this value. If None, uses the
+          maximum column value below the z_threshold
+    """
+    step_name = "z_score_clipper"
+
+    def process(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Process the dataframe by clipping values above the specified Z-Score.
+
+        Args:
+            df: Input DataFrame
+
+        Returns:
+            DataFrame with clipped values
+        """
+        columns = self.config.get("columns")
+        z_threshold = float(self.config.get("z_threshold", 3.0))
+        clipped_value = self.config.get("clipped_value")
+
+        if columns is None:
+            # If no columns specified, use all numeric columns
+            columns = df.select_dtypes(include=np.number).columns.tolist()
+            logger.info(f"No columns specified in config. Using all numeric columns: {columns}")
+
+        for col in columns:
+            if col not in df.columns:
+                logger.warning(f"Column '{col}' not found in DataFrame. Skipping.")
+                continue
+
+            if not pd.api.types.is_numeric_dtype(df[col]):
+                logger.warning(f"Column '{col}' is not numeric. Skipping.")
+                continue
+
+            # Calculate Z-scores
+            z_scores = (df[col] - df[col].mean()) / df[col].std()
+
+            # Determine clipping value
+            if clipped_value is None:
+                current_clipped_value = df.loc[z_scores < z_threshold, col].max()
+            else:
+                current_clipped_value = clipped_value
+
+            # Clip values
+            outlier_mask = z_scores > z_threshold
+            if outlier_mask.any():
+                logger.debug(f"Clipping {outlier_mask.sum()} outliers in column '{col}'")
+                df.loc[outlier_mask, col] = current_clipped_value
+
+        return df
+
+
