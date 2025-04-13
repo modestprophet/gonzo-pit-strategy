@@ -105,6 +105,7 @@ class LaggedFeatureGenerator(PipelineStep):
         shift_period: int = self.config.get("shift_period", 1)
         fill_value: Any = self.config.get("fill_value", 0)
         new_col_prefix: str = self.config.get("new_col_prefix", "lagged_")
+        drop_original = self.config.get("drop_original", True)
         numeric_lagged_cols: List[str] = self.config.get("numeric_lagged_cols", [])
 
         # --- Validation ---
@@ -143,6 +144,13 @@ class LaggedFeatureGenerator(PipelineStep):
             if col in numeric_lagged_cols:
                 df[new_col_name] = pd.to_numeric(df[new_col_name], errors='coerce').fillna(fill_value)
                 logger.debug(f"Ensured column '{new_col_name}' is numeric.")
+
+        # Drop original columns if specified
+        if drop_original:
+            cols_to_drop = [col for col in lag_cols if col in df.columns]
+            if cols_to_drop:
+                df = df.drop(columns=cols_to_drop)
+                logger.debug(f"Dropped original columns: {cols_to_drop}")
 
         logger.info(f"Generated lagged columns: {[f'{new_col_prefix}{col}' for col in lag_cols]}")
         return df

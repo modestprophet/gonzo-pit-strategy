@@ -224,7 +224,7 @@ class DataPipeline:
 
         # Generate version if not provided
         if save_version is None:
-            timestamp = datetime.now().strftime("%Y%m%d%H%M")
+            timestamp = datetime.now().strftime("%Y%m%d")  #  "%Y%m%d%H%M"
             data_hash = self._compute_data_hash(df)
             save_version = f"{timestamp}_{data_hash}"
 

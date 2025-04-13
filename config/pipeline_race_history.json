@@ -19,7 +19,8 @@
             "q3": "0:00.000",
             "milliseconds": 0,
             "fastestlaptime": 0,
-            "fastestlapspeed": 0
+            "fastestlapspeed": 0,
+            "qualifyingposition": 50
           }
         }
       },
@@ -28,7 +29,7 @@
         "enabled": true,
         "config": {
           "datetime_columns": ["racedate", "racetime"],
-          "numeric_columns": ["milliseconds", "points", "drivertotalpoints", "constructortotalpoints"]
+          "numeric_columns": ["milliseconds", "points", "drivertotalpoints", "constructortotalpoints", "qualifyingposition"]
         }
       },
       {
@@ -53,8 +54,9 @@
         "name": "numerical_scaler",
         "enabled": true,
         "config": {
-          "columns": ["qualifyingPosition", "startinggrid", "finishpositionOrder", "milliseconds",
-            "points", "drivertotalpoints", "constructortotalpoints"],
+          "columns": ["qualifyingposition", "startinggrid", "finishpositionorder", "milliseconds",
+            "points", "drivertotalpoints", "constructortotalpoints", "driverrank", "driverwins",
+            "constructorrank", "constructorwins"],
           "scaler": "standard"
         }
       },
@@ -69,7 +71,9 @@
             "driverwins",
             "constructortotalpoints",
             "constructorrank",
-            "constructorwins"
+            "constructorwins",
+            "milliseconds",
+            "finishpositiontext"
           ],
           "group_columns": [
             "raceyear",
@@ -79,6 +83,7 @@
           "shift_period": 1,
           "fill_value": 0,
           "new_col_prefix": "prev_race_",
+          "drop_original": true,
           "numeric_lagged_cols": [
             "driverrank",
             "constructorrank"
@@ -96,7 +101,7 @@
     "z_threshold": 3.0,
     "clipped_value": null,
     "columns": [
-      "qualifyingPosition",
+      "qualifyingposition",
       "startinggrid",
       "finishpositionOrder",
       "milliseconds",
@@ -104,6 +109,26 @@
       "drivertotalpoints",
       "constructortotalpoints"
     ]
+        }
+      },
+      {
+        "name": "drop_columns",
+        "enabled": false,
+        "config": {
+          "columns": [
+            "raceid",
+            "circuitid",
+            "raceyear",
+            "racedate",
+            "racetime",
+            "roundnumber",
+            "raceurl",
+            "constructorid",
+            "driverid",
+            "q1",
+            "q2",
+            "q3"
+          ]
         }
       }
     ]

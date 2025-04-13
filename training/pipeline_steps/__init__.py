@@ -5,6 +5,7 @@ from .type_converter import DataTypeConverter
 from .encoders import CategoricalEncoder
 from .scalers import NumericalScaler
 from .race_data_transforms import QualifyingTimeConverter
+from .drop_columns import DropColumns
 
 __all__ = [
     'PipelineStep',
