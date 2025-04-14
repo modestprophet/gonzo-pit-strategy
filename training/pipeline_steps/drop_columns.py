@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from .base_step import PipelineStep
 from gonzo_pit_strategy.log.logger import get_console_logger
 
@@ -35,4 +36,6 @@ class DropColumns(PipelineStep):
         # Drop only columns that exist in the DataFrame
         columns_to_drop = [col for col in columns_to_drop if col in df.columns]
         logger.debug(f"Columns dropped: {columns_to_drop}")
+        logger.debug(f"Numeric columns: {df.select_dtypes(include=np.number).columns.tolist()}")
+
         return df.drop(columns=columns_to_drop, errors='ignore')

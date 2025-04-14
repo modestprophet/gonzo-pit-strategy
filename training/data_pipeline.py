@@ -120,19 +120,37 @@ class DataPipeline:
             file_path: Path where the data file is saved
         """
         with db_session() as session:
-            dataset_version = DatasetVersion(
+            # Check if this dataset version already exists
+            existing = session.query(DatasetVersion).filter_by(
                 dataset_name=dataset_name,
-                version=version,
-                description=description,
-                created_at=datetime.now(),
-                created_by='data_pipeline',
-                data_path=file_path,
-                record_count=len(df),
-                feature_count=len(df.columns),
-                preprocessing_steps=steps_applied
-            )
-            session.add(dataset_version)
-            logger.info(f"Saved dataset version metadata: {dataset_name} v{version}")
+                version=version
+            ).first()
+
+            if existing:
+                # Update the existing record with new values
+                existing.description = description
+                existing.created_at = datetime.now()
+                existing.created_by = 'data_pipeline'
+                existing.data_path = file_path
+                existing.record_count = len(df)
+                existing.feature_count = len(df.columns)
+                existing.preprocessing_steps = steps_applied
+                logger.info(f"Updated existing dataset version: {dataset_name} v{version}")
+            else:
+                # Create new record if it doesn't exist
+                dataset_version = DatasetVersion(
+                    dataset_name=dataset_name,
+                    version=version,
+                    description=description,
+                    created_at=datetime.now(),
+                    created_by='data_pipeline',
+                    data_path=file_path,
+                    record_count=len(df),
+                    feature_count=len(df.columns),
+                    preprocessing_steps=steps_applied
+                )
+                session.add(dataset_version)
+                logger.info(f"Saved new dataset version metadata: {dataset_name} v{version}")
 
     def _save_artifacts(self, version: str):
         """Save pipeline artifacts like encoders and scalers.

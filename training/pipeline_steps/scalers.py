@@ -59,7 +59,9 @@ class NumericalScaler(PipelineStep):
 
         # Filter to only include columns that exist and are numeric
         valid_columns = [col for col in columns if col in df.columns]
+        logger.debug(f"'valid_columns': {valid_columns}")
         numeric_columns = df[valid_columns].select_dtypes(include=np.number).columns.tolist()
+        logger.debug(f"'numeric_columns': {numeric_columns}")
 
         if not numeric_columns:
             logger.warning("No valid numeric columns found for scaling")

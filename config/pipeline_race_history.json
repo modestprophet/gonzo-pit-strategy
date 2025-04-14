@@ -29,7 +29,7 @@
         "enabled": true,
         "config": {
           "datetime_columns": ["racedate", "racetime"],
-          "numeric_columns": ["milliseconds", "points", "drivertotalpoints", "constructortotalpoints", "qualifyingposition"]
+          "numeric_columns": ["milliseconds", "points", "drivertotalpoints", "constructortotalpoints", "qualifyingposition", "driverrank", "constructorrank"]
         }
       },
       {
@@ -43,7 +43,7 @@
         "name": "categorical_encoder",
         "enabled": true,
         "config": {
-          "columns": ["circuitname", "constructorname", "drivercode", "status"],
+          "columns": ["circuitname", "constructorname", "drivercode"],
           "drop_original": true,
           "drop_first": true,
           "sparse_output": false,
@@ -56,7 +56,7 @@
         "config": {
           "columns": ["qualifyingposition", "startinggrid", "finishpositionorder", "milliseconds",
             "points", "drivertotalpoints", "constructortotalpoints", "driverrank", "driverwins",
-            "constructorrank", "constructorwins"],
+            "constructorrank", "constructorwins", "q1_seconds", "q2_seconds", "q3_seconds"],
           "scaler": "standard"
         }
       },
@@ -72,8 +72,7 @@
             "constructortotalpoints",
             "constructorrank",
             "constructorwins",
-            "milliseconds",
-            "finishpositiontext"
+            "milliseconds"
           ],
           "group_columns": [
             "raceyear",
@@ -83,11 +82,7 @@
           "shift_period": 1,
           "fill_value": 0,
           "new_col_prefix": "prev_race_",
-          "drop_original": true,
-          "numeric_lagged_cols": [
-            "driverrank",
-            "constructorrank"
-          ]
+          "drop_original": true
         }
       },
       {
@@ -112,8 +107,17 @@
         }
       },
       {
+        "name": "label_encoder",
+        "enabled": true,
+        "config": {
+          "columns": ["finishpositiontext"],
+          "drop_original": true,
+          "unknown_value": -1
+        }
+      },
+      {
         "name": "drop_columns",
-        "enabled": false,
+        "enabled": true,
         "config": {
           "columns": [
             "raceid",
@@ -127,7 +131,12 @@
             "driverid",
             "q1",
             "q2",
-            "q3"
+            "q3",
+            "finishpositionorder",
+            "fastestlap",
+            "fastestlaptime",
+            "fastestlapspeed",
+            "status"
           ]
         }
       }
