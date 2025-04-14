@@ -50,7 +50,8 @@ class QualifyingTimeConverter(PipelineStep):
                 # Replace whitespace-only strings with NaN
                 df[col] = df[col].replace(r'^\s*$', np.nan, regex=True)
                 # Create a missing indicator column
-                df[f'{col}_missing'] = np.where(df[col].isnull(), 1, 0)
+                # df[f'{col}_missing'] = np.where(df[col].isnull(), 1, 0)
+                df[f'{col}_missing'] = np.where(df[col] == "0:00.000", 1, 0)
                 # Convert to datetime objects
                 try:
                     df[col] = pd.to_datetime(df[col], format='%M:%S.%f')

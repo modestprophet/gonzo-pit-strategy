@@ -14,7 +14,7 @@ print(project_root)
 config_path = os.path.join(project_root, 'config', 'pipeline_race_history.json')
 
 pipeline = DataPipeline(config_path=config_path)
-df = pipeline.process(year=2021)
+df = pipeline.process()
 
 # # Later, load transformers for inference
 # pipeline = DataPipeline()
