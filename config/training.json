@@ -1,1 +1,19 @@
-{"purpose": "training parameters"}
+{
+  "model_type": "dense",
+  "model_config_path": "../../config/model.json",
+  "pipeline_config_path": "../../config/pipeline_race_history.json",
+  "data_version": null,
+  "dataset_name": "f1_race_data",
+  "target_column": "finishpositiontext",
+  "feature_columns": null,
+  "test_size": 0.2,
+  "validation_size": 0.1,
+  "random_state": 42,
+  "batch_size": 32,
+  "epochs": 100,
+  "early_stopping": true,
+  "patience": 10,
+  "tensorboard_log_dir": "../../logs/tensorboard",
+  "checkpoint_dir": "../../models/checkpoints",
+  "save_best_only": true
+}

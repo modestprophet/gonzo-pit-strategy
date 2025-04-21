@@ -15,7 +15,7 @@
       "level": "DEBUG"
     },
     "db": {
-      "level": "DEBUG"
+      "level": "INFO"
     },
     "inference": {
       "level": "INFO"
@@ -24,7 +24,7 @@
       "level": "DEBUG"
     },
     "security": {
-      "level": "DEBUG"
+      "level": "INFO"
     }
   }
 }

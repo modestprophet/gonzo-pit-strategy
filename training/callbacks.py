@@ -2,14 +2,14 @@
 Custom TensorFlow callbacks for model training.
 """
 from typing import Dict, Any, Optional
-import tensorflow as tf
+import keras
 from datetime import datetime
 
 from db.models.training_metrics import TrainingMetric
 from db.base import db_session
 
 
-class MetricsLoggingCallback(tf.keras.callbacks.Callback):
+class MetricsLoggingCallback(keras.callbacks.Callback):
     """
     Callback for logging training metrics to the database.
 
@@ -72,7 +72,7 @@ class MetricsLoggingCallback(tf.keras.callbacks.Callback):
             session.commit()
 
 
-class ConsoleMetricsCallback(tf.keras.callbacks.Callback):
+class ConsoleMetricsCallback(keras.callbacks.Callback):
     """
     Callback for pretty-printing metrics to the console.
     """

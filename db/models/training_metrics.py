@@ -7,7 +7,7 @@ class TrainingMetric(Base):
     __tablename__ = 'training_metrics'
 
     metric_id = Column(Integer, primary_key=True)
-    run_id = Column(Integer, ForeignKey('training_runs.run_id', ondelete='CASCADE'), nullable=False)
+    run_id = Column(Integer, ForeignKey('f1db.training_runs.run_id', ondelete='CASCADE'), nullable=False)
     epoch = Column(Integer, nullable=False)
     timestamp = Column(DateTime, nullable=False, default=func.current_timestamp())
     metric_name = Column(String(100), nullable=False)
