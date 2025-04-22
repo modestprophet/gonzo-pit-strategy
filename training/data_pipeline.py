@@ -14,7 +14,7 @@ import hashlib
 
 from db.base import db_session
 from db.models.dataset_versions import DatasetVersion
-from db.repositiries.data_repository import F1DataRepository
+from db.repositories.data_repository import F1DataRepository
 from gonzo_pit_strategy.log.logger import get_console_logger
 from training.pipeline_steps.base_step import PipelineStep
 from config.config import config

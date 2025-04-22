@@ -281,7 +281,8 @@ class ModelTrainer:
             "test_loss": float(test_loss),
             "test_metrics": {metric_name: float(test_metrics[i]) for i, metric_name in enumerate(model.metrics_names[1:])},
             "training_config": self.config,
-            "environment": config.environment
+            "environment": config.environment,
+            "config_path": str(config_path)
         }
 
         # Save model and metadata
