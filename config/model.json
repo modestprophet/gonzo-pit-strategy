@@ -1,6 +1,6 @@
 {
   "model_name": "f1_pit_strategy_model.keras",
-  "model_path": "../../models/artifacts",
+  "model_path": "models/artifacts",
   "input_shape": [
     195
   ],

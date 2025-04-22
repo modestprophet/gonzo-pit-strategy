@@ -16,7 +16,7 @@ from gonzo_pit_strategy.log.logger import get_console_logger
 
 logger = get_console_logger(__name__)
 
-
+#TODO: implement handling for various Vault errors
 class VaultError(Exception):
     """Base exception for Vault-related errors."""
     pass
@@ -74,6 +74,7 @@ class Multipass:
             return
 
         # Load environment variables
+        #TODO: change to grabbing secrets from environment instead of .env file
         env_file = Path(__file__).parent.parent / '.env'
         load_dotenv(env_file)
 

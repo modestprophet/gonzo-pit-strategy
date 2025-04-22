@@ -7,23 +7,20 @@ using the processed data from the data pipeline.
 import os
 import json
 import time
-from typing import Dict, Any, Optional, List, Tuple, Union
+from typing import Dict, Any, List, Tuple
 import numpy as np
-import pandas as pd
 import keras
 from keras import callbacks
-from pathlib import Path
 from datetime import datetime
 
-from models.model import get_model, ModelBase
+from models.model import get_model
 from training.data_pipeline import DataPipeline
 from gonzo_pit_strategy.log.logger import get_console_logger
 from db.base import db_session
-from db.models.model_metadata import ModelMetadata
 from db.models.training_runs import TrainingRun
 from db.models.training_metrics import TrainingMetric
 from db.repositories.model_repository import ModelRepository
-from training.callbacks import MetricsLoggingCallback
+from config.config import config
 
 logger = get_console_logger(__name__)
 
@@ -31,17 +28,16 @@ logger = get_console_logger(__name__)
 class ModelTrainer:
     """Class for training machine learning models."""
 
-    def __init__(self, config_path: str = "../../config/training.json"):
+    def __init__(self, config_name: str = "training"):
         """Initialize the trainer with configuration.
 
         Args:
-            config_path: Path to training configuration JSON file
+            config_name: Name of the configuration to use (default: "training")
         """
-        with open(config_path, 'r') as f:
-            self.config = json.load(f)
+        self.config = config.get_config(config_name)
 
-        # Store config path for reference
-        self.config_path = config_path
+        # Store config name for reference
+        self.config_name = config_name
 
         # Initialize model and data pipeline
         self.model = None
@@ -63,8 +59,8 @@ class ModelTrainer:
         random_state = self.config.get('random_state', 42)
 
         # Initialize data pipeline
-        pipeline_config_path = self.config.get('pipeline_config_path', '../../config/pipeline_race_history.json')
-        self.data_pipeline = DataPipeline(config_path=pipeline_config_path)
+        pipeline_config_name = self.config.get('pipeline_config_name', 'pipeline')
+        self.data_pipeline = DataPipeline(config_name=pipeline_config_name)
 
         # Load data
         if data_version:
@@ -131,11 +127,15 @@ class ModelTrainer:
         cb_list = []
 
         # Get configuration parameters
-        tensorboard_log_dir = self.config.get('tensorboard_log_dir', '../../logs/tensorboard')
-        checkpoint_dir = self.config.get('checkpoint_dir', '../../models/checkpoints')
+        tensorboard_log_dir = self.config.get('tensorboard_log_dir', 'logs/tensorboard')
+        checkpoint_dir = self.config.get('checkpoint_dir', 'models/checkpoints')
         save_best_only = self.config.get('save_best_only', True)
         early_stopping = self.config.get('early_stopping', True)
         patience = self.config.get('patience', 10)
+
+        # Resolve paths relative to project root
+        tensorboard_log_dir = str(config.get_path(tensorboard_log_dir))
+        checkpoint_dir = str(config.get_path(checkpoint_dir)) if checkpoint_dir else None
 
         # TensorBoard callback
         log_dir = os.path.join(tensorboard_log_dir, model_version)
@@ -186,7 +186,7 @@ class ModelTrainer:
         """
         # Get configuration parameters
         model_type = self.config.get('model_type', 'dense')
-        model_config_path = self.config.get('model_config_path', '../../config/model.json')
+        model_config_name = self.config.get('model_config_name', 'model')
         batch_size = self.config.get('batch_size', 32)
         epochs = self.config.get('epochs', 100)
         early_stopping = self.config.get('early_stopping', True)
@@ -210,19 +210,20 @@ class ModelTrainer:
             output_shape = y_train.shape[1]
 
         # Update model config with shapes
-        with open(model_config_path, 'r') as f:
-            model_config = json.load(f)
+        model_config = config.get_config(model_config_name, reload=True)
 
         model_config['input_shape'] = input_shape
         model_config['output_shape'] = output_shape
         model_config['feature_columns'] = feature_columns
         model_config['target_column'] = target_column
 
-        with open(model_config_path, 'w') as f:
+        # Save updated configuration
+        config_path = config.get_config_path(model_config_name)
+        with open(config_path, 'w') as f:
             json.dump(model_config, f, indent=2)
 
         # Initialize model
-        self.model = get_model(model_type, config_path=model_config_path)
+        self.model = get_model(model_type, config_name=model_config_name)
 
         # Build model
         model = self.model.build()
@@ -269,7 +270,7 @@ class ModelTrainer:
             "architecture": model_type,
             "tags": ["f1", "pit_strategy", model_type],
             "config": model_config,
-            "config_path": model_config_path,
+            "config_name": model_config_name,
             "feature_columns": feature_columns,
             "target_column": target_column,
             "input_shape": input_shape,
@@ -279,7 +280,8 @@ class ModelTrainer:
             "test_samples": X_test.shape[0],
             "test_loss": float(test_loss),
             "test_metrics": {metric_name: float(test_metrics[i]) for i, metric_name in enumerate(model.metrics_names[1:])},
-            "training_config": self.config
+            "training_config": self.config,
+            "environment": config.environment
         }
 
         # Save model and metadata
@@ -339,15 +341,15 @@ class ModelTrainer:
         return model, history.history, model_version, model_id, run_id
 
 
-def train_model(config_path: str = "../../config/training.json") -> Tuple[str, int, int]:
+def train_model(config_name: str = "training") -> Tuple[str, int, int]:
     """Train a model using the specified configuration.
 
     Args:
-        config_path: Path to training configuration
+        config_name: Name of the configuration to use (default: "training")
 
     Returns:
         Tuple of (model_version, model_id, run_id)
     """
-    trainer = ModelTrainer(config_path=config_path)
+    trainer = ModelTrainer(config_name=config_name)
     _, _, model_version, model_id, run_id = trainer.train()
     return model_version, model_id, run_id

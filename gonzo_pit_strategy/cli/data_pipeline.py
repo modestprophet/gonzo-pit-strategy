@@ -1,20 +1,29 @@
-#Process data and save transformers
-# TODO: Explore saving OHE and scalar to DB, config, or something other than pickle
+"""
+Command-line interface for data pipeline.
+
+This script processes data through the pipeline and saves transformers.
+"""
 import os
+import sys
+from pathlib import Path
+
+# Add project root to Python path
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(project_root))
+
 from training.data_pipeline import DataPipeline
+from gonzo_pit_strategy.log.logger import get_console_logger
 
+logger = get_console_logger(__name__)
 
-current_file_path = os.path.abspath(__file__)  # Absolute path to this script
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file_path)) ) # Go up three levels
+logger.info("Starting data pipeline processing")
 
-print(current_file_path)
-print(project_root)
-
-# pipeline_project_root = get_project_root()
-config_path = os.path.join(project_root, 'config', 'pipeline_race_history.json')
-
-pipeline = DataPipeline(config_path=config_path)
+# Use the new configuration system
+pipeline = DataPipeline(config_name="pipeline")
 df = pipeline.process()
+
+logger.info(f"Data processing complete. Shape: {df.shape}")
+logger.info(f"Data version: {pipeline.version}")
 
 # # Later, load transformers for inference
 # pipeline = DataPipeline()

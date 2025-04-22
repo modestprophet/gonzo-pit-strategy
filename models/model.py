@@ -5,29 +5,26 @@ This module provides model classes for different architectures that can be used
 for predicting pit strategy outcomes. 
 """
 import os
-import json
-from typing import Dict, Any, Optional, List, Tuple
 import keras
-from keras import layers, models, optimizers, callbacks
-from keras.src.saving import load_model
-import numpy as np
+from keras import layers, models, optimizers
 
 from db.repositories.model_repository import ModelRepository
+from config.config import config
 
 class ModelBase:
     """Base class for all models."""
 
-    def __init__(self, config_path: str = "../../config/model.json"):
+    def __init__(self, config_name: str = "model"):
         """Initialize the model with configuration.
 
         Args:
-            config_path: Path to model configuration JSON file
+            config_name: Name of the configuration to use (default: "model")
         """
-        with open(config_path, 'r') as f:
-            self.config = json.load(f)
+        self.config = config.get_config(config_name)
 
         self.model = None
-        self.model_path = self.config.get('model_path', '../../models/artifacts')
+        model_path = self.config.get('model_path', 'models/artifacts')
+        self.model_path = str(config.get_path(model_path))
         self.model_name = self.config.get('model_name', 'f1_pit_strategy_model')
         self.input_shape = self.config.get('input_shape', None)
         self.output_shape = self.config.get('output_shape', None)
@@ -211,12 +208,12 @@ class BiLSTMModel(ModelBase):
         return self.model
 
 
-def get_model(model_type: str, config_path: str = "../../config/model.json") -> ModelBase:
+def get_model(model_type: str, config_name: str = "model") -> ModelBase:
     """Factory function to get a model instance.
 
     Args:
         model_type: Type of model to create ('dense', 'bilstm', etc.)
-        config_path: Path to model configuration
+        config_name: Name of the configuration to use (default: "model")
 
     Returns:
         Model instance
@@ -229,4 +226,4 @@ def get_model(model_type: str, config_path: str = "../../config/model.json") -> 
     if model_type not in model_types:
         raise ValueError(f"Unknown model type: {model_type}. Available types: {list(model_types.keys())}")
 
-    return model_types[model_type](config_path=config_path)
+    return model_types[model_type](config_name=config_name)

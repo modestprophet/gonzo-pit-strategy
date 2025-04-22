@@ -4,13 +4,18 @@ Command-line interface for training models.
 This module provides a command-line interface for training machine learning models
 using the data from the data pipeline.
 """
-import os
+import sys
 import argparse
 import json
 from pathlib import Path
 
+# Add project root to Python path
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(project_root))
+
 from training.trainer import train_model
 from gonzo_pit_strategy.log.logger import get_console_logger
+from config.config import config
 
 logger = get_console_logger(__name__)
 
@@ -19,8 +24,8 @@ def main():
     """Main entry point for the training CLI."""
     parser = argparse.ArgumentParser(description='Train a model for F1 pit strategy prediction')
 
-    parser.add_argument('--config', type=str, default='../../config/training.json',
-                        help='Path to training configuration file')
+    parser.add_argument('--config-name', type=str, default='training',
+                        help='Name of the configuration to use (default: training)')
     parser.add_argument('--model-type', type=str, choices=['dense', 'bilstm'],
                         help='Type of model to train (overrides config)')
     parser.add_argument('--data-version', type=str,
@@ -33,31 +38,31 @@ def main():
     args = parser.parse_args()
 
     # Load configuration
-    with open(args.config, 'r') as f:
-        config = json.load(f)
+    training_config = config.get_config(args.config_name, reload=True)
 
     # Override configuration with command-line arguments
     if args.model_type:
-        config['model_type'] = args.model_type
+        training_config['model_type'] = args.model_type
     if args.data_version:
-        config['data_version'] = args.data_version
+        training_config['data_version'] = args.data_version
     if args.epochs:
-        config['epochs'] = args.epochs
+        training_config['epochs'] = args.epochs
     if args.batch_size:
-        config['batch_size'] = args.batch_size
+        training_config['batch_size'] = args.batch_size
 
     # Save updated configuration
-    with open(args.config, 'w') as f:
-        json.dump(config, f, indent=2)
+    config_path = config.get_config_path(args.config_name)
+    with open(config_path, 'w') as f:
+        json.dump(training_config, f, indent=2)
 
-    logger.info(f"Training model with configuration from {args.config}")
-    logger.info(f"Model type: {config['model_type']}")
-    logger.info(f"Data version: {config['data_version']}")
-    logger.info(f"Epochs: {config['epochs']}")
-    logger.info(f"Batch size: {config['batch_size']}")
+    logger.info(f"Training model with configuration: {args.config_name}")
+    logger.info(f"Model type: {training_config['model_type']}")
+    logger.info(f"Data version: {training_config['data_version']}")
+    logger.info(f"Epochs: {training_config['epochs']}")
+    logger.info(f"Batch size: {training_config['batch_size']}")
 
     # Train model
-    model_version, model_id, run_id = train_model(config_path=args.config)
+    model_version, model_id, run_id = train_model(config_name=args.config_name)
 
     logger.info(f"Training complete. Model version: {model_version}")
     logger.info(f"Model ID: {model_id}, Training Run ID: {run_id}")

@@ -17,6 +17,7 @@ from db.models.dataset_versions import DatasetVersion
 from db.repositiries.data_repository import F1DataRepository
 from gonzo_pit_strategy.log.logger import get_console_logger
 from training.pipeline_steps.base_step import PipelineStep
+from config.config import config
 
 logger = get_console_logger(__name__)
 
@@ -24,22 +25,28 @@ logger = get_console_logger(__name__)
 class DataPipeline:
     """Main data processing pipeline."""
 
-    def __init__(self, config_path: str = "../../config/pipeline.json"):
+    def __init__(self, config_name: str = "pipeline"):
         """Initialize the data pipeline.
 
         Args:
-            config_path: Path to pipeline configuration JSON file
+            config_name: Name of the configuration to use (default: "pipeline")
         """
-        with open(config_path, 'r') as f:
-            self.config = json.load(f)['pipeline']
+        pipeline_config = config.get_config(config_name)
+        self.config = pipeline_config.get('pipeline', {})
 
         self.name = self.config.get('name', 'f1_data_pipeline')
         self.version = self.config.get('version', '0.1.0')
         self.steps = []
         self.save_checkpoints = self.config.get('save_checkpoints', True)
-        self.checkpoint_dir = self.config.get('checkpoint_dir', '../../data/processed')
+
+        # Get paths and resolve them relative to project root
+        checkpoint_dir = self.config.get('checkpoint_dir', 'data/processed')
+        self.checkpoint_dir = str(config.get_path(checkpoint_dir))
+
         self.checkpoint_format = self.config.get('checkpoint_format', 'tsv')
-        self.artifacts_dir = self.config.get('artifacts_dir', '../../models/artifacts')
+
+        artifacts_dir = self.config.get('artifacts_dir', 'models/artifacts')
+        self.artifacts_dir = str(config.get_path(artifacts_dir))
 
         # Initialize pipeline steps
         self._init_steps()
