@@ -12,9 +12,9 @@ import pandas as pd
 from models.model import get_model
 from training.data_pipeline import DataPipeline
 from db.repositories.model_repository import ModelRepository
-from gonzo_pit_strategy.log.logger import get_console_logger
+from gonzo_pit_strategy.log.logger import get_logger
 
-logger = get_console_logger(__name__)
+logger = get_logger(__name__)
 
 
 class ModelPredictor:

@@ -1,30 +1,34 @@
 {
-  "console": {
-    "level": "DEBUG",
-    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  },
+  "level": "INFO",
+  "type": ["console"],
+  "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+
   "database": {
     "level": "INFO",
     "enabled": true
   },
-  "root": {
-    "level": "INFO"
-  },
+
   "loggers": {
     "gonzo_pit_strategy": {
-      "level": "DEBUG"
+      "level": "DEBUG",
+      "type": ["console", "file"]
     },
     "db": {
-      "level": "INFO"
+      "level": "INFO",
+      "type": ["console", "file"]
     },
     "inference": {
-      "level": "INFO"
+      "level": "INFO",
+      "type": ["console", "file", "database"]
     },
     "training": {
-      "level": "DEBUG"
+      "level": "DEBUG",
+      "type": ["console", "file", "database"]
     },
     "security": {
-      "level": "INFO"
+      "level": "INFO",
+      "type": ["console", "file"],
+      "format": "%(asctime)s - SECURITY - %(levelname)s - %(message)s"
     }
   }
 }

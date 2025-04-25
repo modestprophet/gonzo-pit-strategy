@@ -6,12 +6,12 @@ This module provides a generic base repository pattern implementation
 for database model operations.
 """
 
-import logging
+from gonzo_pit_strategy.log.logger import get_logger
 from typing import TypeVar, Generic, Type, List, Optional, Any
 
 from ..base import Base, db_session
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Type variable for models
 T = TypeVar('T', bound=Base)

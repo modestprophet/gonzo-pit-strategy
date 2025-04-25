@@ -1,9 +1,9 @@
 """Pipeline step for converting data types."""
 import pandas as pd
 from .base_step import PipelineStep
-from gonzo_pit_strategy.log.logger import get_console_logger
+from gonzo_pit_strategy.log.logger import get_logger
 
-logger = get_console_logger(__name__)
+logger = get_logger(__name__)
 
 
 class DataTypeConverter(PipelineStep):

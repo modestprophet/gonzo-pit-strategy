@@ -12,9 +12,9 @@ project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(project_root))
 
 from training.data_pipeline import DataPipeline
-from gonzo_pit_strategy.log.logger import get_console_logger
+from gonzo_pit_strategy.log.logger import get_logger
 
-logger = get_console_logger(__name__)
+logger = get_logger(__name__)
 
 logger.info("Starting data pipeline processing")
 

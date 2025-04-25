@@ -1,8 +1,8 @@
 """
-database logging function
+Database logging functionality
 
-defined outside of main logging file to avoid circular imports
-when using project logging in the db portions of the codebase
+Defined separately to avoid circular imports when using project logging
+in the db portions of the codebase
 """
 
 import traceback
@@ -31,10 +31,6 @@ def log_to_database(
         user_id: Optional user ID associated with the log
         correlation_id: Optional correlation ID for request tracing
     """
-    # Generate stack trace if not provided for errors
-    if stack_trace is None and level in ("ERROR", "CRITICAL"):
-        stack_trace = ''.join(traceback.format_stack())
-
     # Create log entry
     log_entry = ApplicationLog(
         timestamp=datetime.now(),

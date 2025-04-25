@@ -16,9 +16,9 @@ from db.models.f1_models import (
     Driver, DriverStanding, LapTime, PitStop, Qualifying,
     Race, Result, Season, SprintResult, Status
 )
-from gonzo_pit_strategy.log.logger import get_console_logger
+from gonzo_pit_strategy.log.logger import get_logger
 
-logger = get_console_logger(__name__)
+logger = get_logger(__name__)
 
 T = TypeVar('T', bound=Base)
 

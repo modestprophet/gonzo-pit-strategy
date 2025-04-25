@@ -12,9 +12,9 @@ import tensorflow as tf
 
 from db.base import db_session
 from db.models.model_metadata import ModelMetadata
-from gonzo_pit_strategy.log.logger import get_console_logger
+from gonzo_pit_strategy.log.logger import get_logger
 
-logger = get_console_logger(__name__)
+logger = get_logger(__name__)
 
 class ModelRepository:
     """Repository for managing machine learning models."""

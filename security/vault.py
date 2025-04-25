@@ -12,9 +12,9 @@ from dotenv import load_dotenv
 from functools import wraps
 from typing import Optional, Dict, List, Any
 
-from gonzo_pit_strategy.log.logger import get_console_logger
+from gonzo_pit_strategy.log.logger import get_logger
 
-logger = get_console_logger(__name__)
+logger = get_logger(__name__)
 
 #TODO: implement handling for various Vault errors
 class VaultError(Exception):

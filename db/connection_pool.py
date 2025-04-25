@@ -14,8 +14,8 @@ from sqlalchemy.pool import QueuePool
 
 from .config import DatabaseConfig
 
-from gonzo_pit_strategy.log.logger import get_console_logger
-logger = get_console_logger(__name__)
+from gonzo_pit_strategy.log.logger import get_logger
+logger = get_logger(__name__)
 
 
 class ConnectionPool:

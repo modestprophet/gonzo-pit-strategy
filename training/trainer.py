@@ -15,14 +15,14 @@ from datetime import datetime
 
 from models.model import get_model
 from training.data_pipeline import DataPipeline
-from gonzo_pit_strategy.log.logger import get_console_logger
+from gonzo_pit_strategy.log.logger import get_logger
 from db.base import db_session
 from db.models.training_runs import TrainingRun
 from db.models.training_metrics import TrainingMetric
 from db.repositories.model_repository import ModelRepository
 from config.config import config
 
-logger = get_console_logger(__name__)
+logger = get_logger(__name__)
 
 
 class ModelTrainer:

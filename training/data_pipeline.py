@@ -15,11 +15,11 @@ import hashlib
 from db.base import db_session
 from db.models.dataset_versions import DatasetVersion
 from db.repositories.data_repository import F1DataRepository
-from gonzo_pit_strategy.log.logger import get_console_logger
+from gonzo_pit_strategy.log.logger import get_logger
 from training.pipeline_steps.base_step import PipelineStep
 from config.config import config
 
-logger = get_console_logger(__name__)
+logger = get_logger(__name__)
 
 
 class DataPipeline:
