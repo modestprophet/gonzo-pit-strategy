@@ -14,9 +14,7 @@ import logging
 import os
 import sys
 import traceback
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, Optional, Any
 
 from config.config import config
 
@@ -122,7 +120,9 @@ class Logger:
         os.makedirs(logs_dir, exist_ok=True)
 
         # Configure file handler
-        log_file = logger_config.get("file", f"{self.name.replace('.', '_')}.log")
+        # filename = self.name.replace('.', '_')
+        # log_file = logger_config.get("file", f"{filename}.log")
+        log_file = logger_config.get("file", f"logfile.log")
         file_path = logs_dir / log_file
 
         handler = logging.FileHandler(file_path)

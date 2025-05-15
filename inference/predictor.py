@@ -21,7 +21,7 @@ class ModelPredictor:
     """Class for making predictions with trained models."""
 
     def __init__(self, model_version: str, model_type: str = 'dense', 
-                 config_path: str = "../../config/model.json"):
+                 config_path: str = "config/model.json"):
         """Initialize the predictor with a trained model.
 
         Args:
@@ -73,7 +73,7 @@ class ModelPredictor:
             if pipeline_config_path is None:
                 pipeline_config_path = self.training_metadata.get(
                     'training_config', {}).get(
-                    'pipeline_config_path', "../../config/pipeline_race_history.json")
+                    'pipeline_config_path', "config/pipeline_race_history.json")
 
             self.data_pipeline = DataPipeline(config_path=pipeline_config_path)
 

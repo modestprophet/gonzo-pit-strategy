@@ -23,7 +23,8 @@
     },
     "training": {
       "level": "DEBUG",
-      "type": ["console", "file", "database"]
+      "type": ["console", "file", "database"],
+      "file": "training.log"
     },
     "security": {
       "level": "INFO",

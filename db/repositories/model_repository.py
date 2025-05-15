@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 class ModelRepository:
     """Repository for managing machine learning models."""
 
-    def __init__(self, model_path: str = "../../models/artifacts"):
+    def __init__(self, model_path: str = "models/artifacts"):
         """Initialize the model repository.
 
         Args:

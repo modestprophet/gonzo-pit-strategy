@@ -4,9 +4,9 @@
     "version": "0.1.0",
     "description": "Pipeline for processing F1 race data for pit stop strategy modeling",
     "save_checkpoints": true,
-    "checkpoint_dir": "../../data/processed",
+    "checkpoint_dir": "data/processed",
     "checkpoint_format": "tsv",
-    "artifacts_dir": "../../models/artifacts",
+    "artifacts_dir": "models/artifacts",
     "steps": [
       {
         "name": "null_value_cleaner",
