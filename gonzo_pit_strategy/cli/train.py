@@ -17,7 +17,8 @@ from training.trainer import train_model
 from gonzo_pit_strategy.log.logger import get_logger
 from config.config import config
 
-logger = get_logger(__name__)
+# Use specific logger name to ensure configuration inheritance when run as script
+logger = get_logger("gonzo_pit_strategy.cli.train")
 
 
 def main():

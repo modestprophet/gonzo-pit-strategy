@@ -3,11 +3,6 @@
   "type": ["console"],
   "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 
-  "database": {
-    "level": "INFO",
-    "enabled": true
-  },
-
   "loggers": {
     "gonzo_pit_strategy": {
       "level": "DEBUG",
@@ -19,11 +14,11 @@
     },
     "inference": {
       "level": "INFO",
-      "type": ["console", "file", "database"]
+      "type": ["console", "file"]
     },
     "training": {
       "level": "DEBUG",
-      "type": ["console", "file", "database"],
+      "type": ["console", "file"],
       "file": "training.log"
     },
     "security": {

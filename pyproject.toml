@@ -1,0 +1,17 @@
+[project]
+name = "gonzo-pit-strategy"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dotenv>=0.9.9",
+    "hvac>=2.4.0",
+    "keras>=3.13.0",
+    "numpy>=2.4.0",
+    "pandas>=2.3.3",
+    "psycopg2-binary>=2.9.11",
+    "scikit-learn>=1.8.0",
+    "sqlalchemy>=2.0.45",
+    "tensorflow>=2.20.0",
+]
