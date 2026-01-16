@@ -4,10 +4,10 @@ F1 Database Setup and Initialization Tool
 This script performs a complete setup of the F1 database:
 1. Create the database and schema
 2. Run goose migrations
-3. Load data from TSV files
+3. Load data from Jolpica CSV files
 
 Usage:
-    python db_setup.py [options]
+    python -m gonzo_pit_strategy.utils.db_setup [options]
 
 Options:
     --db-admin-username USERNAME   Admin username for database creation
@@ -27,13 +27,16 @@ import os
 import sys
 import argparse
 import subprocess
+import csv
 from pathlib import Path
+from typing import List, Dict
 
 from gonzo_pit_strategy.log.logger import get_logger
+from gonzo_pit_strategy.utils.db_utils import get_db_url
+
 logger = get_logger("db_setup")
 
 
-# Project structure
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 MIGRATIONS_DIR = PROJECT_ROOT / "db" / "migrations"
 DATA_DIR = PROJECT_ROOT / "data" / "raw"
@@ -67,7 +70,6 @@ def initialize_database(args: argparse.Namespace) -> bool:
         logger.error(f"SQL init file not found: {INIT_SQL_PATH}")
         return False
 
-    # Read SQL template and replace placeholders
     with open(INIT_SQL_PATH, 'r') as f:
         sql_template = f.read()
 
@@ -75,13 +77,11 @@ def initialize_database(args: argparse.Namespace) -> bool:
     sql = sql.replace("{{APP_USERNAME}}", args.app_username)
     sql = sql.replace("{{APP_PASSWORD}}", args.app_password)
 
-    # Write to temporary file
     temp_sql_path = PROJECT_ROOT / "db" / "temp_init.sql"
     with open(temp_sql_path, 'w') as f:
         f.write(sql)
 
     try:
-        # Run psql command
         cmd = [
             "psql",
             "-h", args.db_host,
@@ -91,11 +91,10 @@ def initialize_database(args: argparse.Namespace) -> bool:
             "-f", str(temp_sql_path)
         ]
 
-        # Set PGPASSWORD environment variable for psql
         env = os.environ.copy()
         env["PGPASSWORD"] = args.db_admin_password
 
-        logger.info(f"Running: {' '.join(cmd)}")
+        logger.info(f"Running database initialization script...")
         result = subprocess.run(
             cmd,
             env=env,
@@ -105,8 +104,11 @@ def initialize_database(args: argparse.Namespace) -> bool:
         )
 
         if result.returncode != 0:
-            logger.error(f"Database initialization failed: {result.stderr}")
-            return False
+            if "already exists" in result.stderr:
+                logger.warning(f"Database likely already exists: {result.stderr.strip().splitlines()[0]}")
+            else:
+                logger.error(f"Database initialization failed: {result.stderr}")
+                return False
 
         logger.info("Database initialization successful")
         return True
@@ -116,7 +118,6 @@ def initialize_database(args: argparse.Namespace) -> bool:
         return False
 
     finally:
-        # Clean up temporary SQL file
         if temp_sql_path.exists():
             temp_sql_path.unlink()
 
@@ -129,47 +130,92 @@ def run_migrations(args: argparse.Namespace) -> bool:
         logger.error(f"Migrations directory not found: {MIGRATIONS_DIR}")
         return False
 
-    # Create connection string for goose
-    connection_string = (
-        f"postgres://{args.db_admin_username}:{args.db_admin_password}"
-        f"@{args.db_host}:{args.db_port}/{args.db_name}?sslmode=disable"
+    connection_string = get_db_url(
+        host=args.db_host,
+        port=args.db_port,
+        dbname=args.db_name,
+        user=args.db_admin_username,
+        password=args.db_admin_password
     )
 
     goose_table = f"{args.db_schema}.goose_db_version"
 
-    try:
-        # Run goose up command
-        cmd = [
-            "goose",
-            "-table", goose_table,
-            "-dir", str(MIGRATIONS_DIR),
-            "postgres", connection_string,
-            "up"
-        ]
+    cmd = [
+        "goose",
+        "-table", goose_table,
+        "-dir", str(MIGRATIONS_DIR),
+        "postgres", connection_string,
+        "up"
+    ]
 
-        logger.info(f"Running: goose -dir {MIGRATIONS_DIR} postgres [connection_string] up")
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
+    logger.info(f"Applying migrations from {MIGRATIONS_DIR}...")
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
 
-        if result.returncode != 0:
-            logger.error(f"Migration failed: {result.stderr}")
-            return False
-
-        logger.info("Migrations successful")
-        return True
-
-    except Exception as e:
-        logger.error(f"Migration failed: {str(e)}")
+    if result.returncode != 0:
+        logger.error(f"Migration failed: {result.stderr}")
         return False
+
+    logger.info("Migrations successful")
+    return True
+
+
+def load_csv_data(
+    file_path: Path, 
+    table_name: str, 
+    args: argparse.Namespace
+) -> bool:
+    """Load a single CSV file into a table using psql \copy."""
+    if not file_path.exists():
+        logger.warning(f"File not found: {file_path}. Skipping.")
+        return False
+
+    logger.info(f"Loading {file_path.name} into {args.db_schema}.{table_name}...")
+    
+    temp_sql = f"\\copy {args.db_schema}.{table_name} FROM '{file_path.absolute()}' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');"
+    
+    temp_file = PROJECT_ROOT / "temp" / f"load_{table_name}.sql"
+    temp_file.parent.mkdir(exist_ok=True)
+    temp_file.write_text(temp_sql)
+
+    cmd = [
+        "psql",
+        "-h", args.db_host,
+        "-p", str(args.db_port),
+        "-U", args.app_username,
+        "-d", args.db_name,
+        "-f", str(temp_file)
+    ]
+    
+    env = os.environ.copy()
+    env["PGPASSWORD"] = args.app_password
+    
+    result = subprocess.run(
+        cmd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    
+    if result.returncode == 0:
+        logger.info(f"Successfully loaded {table_name}")
+        return True
+    else:
+        logger.error(f"Failed to load {table_name}: {result.stderr}")
+        return False
+        
+    if temp_file.exists():
+        temp_file.unlink()
 
 
 def load_data(args: argparse.Namespace) -> bool:
-    """Load data from TSV files into database tables."""
-    logger.info("Step 3: Loading data from TSV files")
+    """Load data from Jolpica CSV files into database tables."""
+    logger.info("Step 3: Loading data from CSV files")
 
     data_dir = Path(args.data_directory) if args.data_directory else DATA_DIR
 
@@ -177,67 +223,36 @@ def load_data(args: argparse.Namespace) -> bool:
         logger.error(f"Data directory not found: {data_dir}")
         return False
 
-    # Create temporary script directory if it doesn't exist
-    temp_dir = PROJECT_ROOT / "temp"
-    temp_dir.mkdir(exist_ok=True)
-
-    # Create connection string for psql
-    env = os.environ.copy()
-    env["PGPASSWORD"] = args.app_password
+    load_plan = [
+        ("formula_one_baseteam.csv", "base_teams"),
+        ("formula_one_championshipsystem.csv", "championship_systems"),
+        ("formula_one_pointsystem.csv", "point_systems"),
+        ("formula_one_season.csv", "seasons"),
+        ("formula_one_circuit.csv", "circuits"),
+        ("formula_one_driver.csv", "drivers"),
+        ("formula_one_team.csv", "teams"),
+        ("formula_one_teamdriver.csv", "team_drivers"),
+        ("formula_one_round.csv", "rounds"),
+        ("formula_one_session.csv", "sessions"),
+        ("formula_one_roundentry.csv", "round_entries"),
+        ("formula_one_sessionentry.csv", "session_entries"),
+        ("formula_one_lap.csv", "laps"),
+        ("formula_one_pitstop.csv", "pitstops"),
+        ("formula_one_penalty.csv", "penalties"),
+        ("formula_one_championshipadjustment.csv", "championship_adjustments"),
+        ("formula_one_driverchampionship.csv", "driver_championships"),
+        ("formula_one_teamchampionship.csv", "team_championships"),
+    ]
 
     success_count = 0
     fail_count = 0
 
-    for tsv_file in data_dir.glob("*.tsv"):
-        # Extract base name without timestamp and extension
-        base_name = tsv_file.name.split('_')[0]
-
-        # Create a temporary SQL script
-        temp_sql_path = temp_dir / f"load_{base_name}.sql"
-        with open(temp_sql_path, 'w') as f:
-            f.write(f"SET search_path TO {args.db_schema};\n")
-            f.write(
-                f"\\copy {base_name} FROM '{tsv_file}' WITH (FORMAT csv, DELIMITER E'\\t', HEADER true, NULL '');\n")
-
-        try:
-            # Run psql with the script file
-            cmd = [
-                "psql",
-                "-h", args.db_host,
-                "-p", str(args.db_port),
-                "-U", args.app_username,
-                "-d", args.db_name,
-                "-f", str(temp_sql_path)
-            ]
-
-            logger.info(f"Loading {tsv_file.name} into f1db.{base_name}")
-            result = subprocess.run(
-                cmd,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
-            if result.returncode != 0:
-                logger.error(f"Loading data failed for {base_name}: {result.stderr}")
-                fail_count += 1
-            else:
-                logger.info(f"Successfully loaded f1db.{base_name}")
-                success_count += 1
-
-        except Exception as e:
-            logger.error(f"Loading data failed for {base_name}: {str(e)}")
+    for filename, table in load_plan:
+        file_path = data_dir / filename
+        if load_csv_data(file_path, table, args):
+            success_count += 1
+        else:
             fail_count += 1
-
-        # Clean up the temporary SQL file
-        temp_sql_path.unlink()
-
-    # Clean up temp directory if empty
-    try:
-        temp_dir.rmdir()
-    except:
-        pass
 
     logger.info(f"Data loading complete. Success: {success_count}, Failed: {fail_count}")
     return fail_count == 0
@@ -281,34 +296,28 @@ def validate_args(args: argparse.Namespace) -> bool:
 
 
 def main():
-    """Main function to run the database setup process."""
     args = parse_args()
 
-    # Get steps to run
     steps = args.steps.lower().split(',')
     if 'all' in steps:
         steps = ['init', 'migrate', 'load']
 
-    # Validate arguments
     if not validate_args(args):
         sys.exit(1)
 
-    # Run requested steps
     success = True
 
     if 'init' in steps:
         if not initialize_database(args):
             logger.error("Database initialization failed")
-            success = False
-            # Don't continue if initialization fails
             sys.exit(1)
 
-    if 'migrate' in steps and success:
+    if 'migrate' in steps:
         if not run_migrations(args):
             logger.error("Migrations failed")
             success = False
 
-    if 'load' in steps and success:
+    if 'load' in steps:
         if not load_data(args):
             logger.error("Data loading failed")
             success = False
