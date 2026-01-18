@@ -16,7 +16,7 @@ class SeasonProgress(PipelineStep):
     step_name = "season_progress"
 
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['season_progress_percent'] = df['roundnumber'] / df.groupby(['raceyear'])['roundnumber'].transform('max')
+        df['season_progress_percent'] = df['round_number'] / df.groupby(['season_year'])['round_number'].transform('max')
         return df
 
 
@@ -100,9 +100,9 @@ class LaggedFeatureGenerator(PipelineStep):
             ValueError: If required configuration keys are missing.
             KeyError: If specified columns are not found in the DataFrame.
         """
-        lag_cols: List[str] = self.config.get("lag_columns")
-        group_cols: List[str] = self.config.get("group_columns")
-        sort_cols: str = self.config.get("sort_columns")
+        lag_cols: List[str] = self.config.get("lag_columns", [])
+        group_cols: List[str] = self.config.get("group_columns", [])
+        sort_cols: List[str] = self.config.get("sort_columns", [])
         shift_period: int = self.config.get("shift_period", 1)
         fill_value: Any = self.config.get("fill_value", 0)
         new_col_prefix: str = self.config.get("new_col_prefix", "lagged_")
@@ -139,7 +139,8 @@ class LaggedFeatureGenerator(PipelineStep):
             new_col_name = f"{new_col_prefix}{col}"
             # Assign shifted values directly
             shifted_values = df.groupby(group_cols, observed=True, sort=False)[col].shift(shift_period)
-            df[new_col_name] = shifted_values.fillna(fill_value)
+            df[new_col_name] = shifted_values
+            df[new_col_name] = df[new_col_name].fillna(fill_value)
 
             # Convert to numeric if specified
             if col in numeric_lagged_cols:
@@ -166,6 +167,92 @@ class LaggedFeatureGenerator(PipelineStep):
             f"shift={self.config.get('shift_period', 1)}"
         )
         return desc
+
+
+class DNFHandler(PipelineStep):
+    """
+    Handles DNF (Did Not Finish) entries by creating a binary indicator feature
+    and filling NULL finish_position values with a configurable value.
+    
+    Configurable Options:
+        - fill_value (int): Value to fill NULL finish_position entries (default: 25)
+    """
+    step_name = "dnf_handler"
+
+    def process(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Process the dataframe by handling DNF entries.
+        
+        Args:
+            df: Input DataFrame
+            
+        Returns:
+            DataFrame with DNF handling applied
+        """
+        fill_value = self.config.get("fill_value", 25)
+        
+        # Create is_dnf indicator (1 if finish_position is NULL, 0 otherwise)
+        df['is_dnf'] = df['finish_position'].isnull().astype(int)
+        
+        # Fill NULL finish_position values
+        df['finish_position'] = df['finish_position'].fillna(fill_value)
+        
+        logger.info(f"Created is_dnf feature and filled {df['is_dnf'].sum()} NULL finish_position values with {fill_value}")
+        return df
+
+
+class RaceTimeConverter(PipelineStep):
+    """
+    Converts race time from string format to milliseconds.
+    
+    The time column in Jolpica schema is in format like '1:23.456' or '1:23:45.678'
+    This step converts it to milliseconds for numerical processing.
+    """
+    step_name = "race_time_converter"
+
+    def process(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Convert race time column to milliseconds.
+        
+        Args:
+            df: Input DataFrame
+            
+        Returns:
+            DataFrame with race_time_ms column added
+        """
+        if 'time' not in df.columns:
+            logger.warning("Column 'time' not found in DataFrame. Skipping race time conversion.")
+            return df
+            
+        # Create race_time_ms column
+        df['race_time_ms'] = np.nan
+        
+        # Handle non-null time values
+        time_mask = df['time'].notnull() & (df['time'] != '')
+        
+        for idx in df[time_mask].index:
+            time_str = df.loc[idx, 'time']
+            try:
+                # Handle different time formats
+                if ':' in time_str:
+                    parts = time_str.split(':')
+                    if len(parts) == 3:  # H:MM:SS.fff
+                        hours, minutes, seconds = parts[0], parts[1], parts[2]
+                        total_seconds = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                    elif len(parts) == 2:  # M:SS.fff or MM:SS.fff
+                        minutes, seconds = parts[0], parts[1]
+                        total_seconds = int(minutes) * 60 + float(seconds)
+                    else:
+                        logger.warning(f"Unexpected time format: {time_str}. Skipping.")
+                        continue
+                    df.loc[idx, 'race_time_ms'] = total_seconds * 1000
+                else:
+                    # Assume it's already in seconds
+                    df.loc[idx, 'race_time_ms'] = float(time_str) * 1000
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Error converting time '{time_str}': {e}. Setting to NaN.")
+                df.loc[idx, 'race_time_ms'] = np.nan
+                
+        logger.info(f"Converted race time to milliseconds for {time_mask.sum()} entries")
+        return df
 
 
 class ZScoreClipper(PipelineStep):

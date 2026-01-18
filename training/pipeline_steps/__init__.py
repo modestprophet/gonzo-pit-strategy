@@ -4,7 +4,7 @@ from .null_cleaner import NullValueCleaner
 from .type_converter import DataTypeConverter
 from .encoders import CategoricalEncoder
 from .scalers import NumericalScaler
-from .race_data_transforms import QualifyingTimeConverter
+from .race_data_transforms import QualifyingTimeConverter, SeasonProgress, DNFHandler, RaceTimeConverter
 from .drop_columns import DropColumns
 
 __all__ = [
@@ -13,5 +13,9 @@ __all__ = [
     'DataTypeConverter',
     'CategoricalEncoder',
     'NumericalScaler',
-    'QualifyingTimeConverter'
+    'QualifyingTimeConverter',
+    'SeasonProgress',
+    'DNFHandler',
+    'RaceTimeConverter',
+    'DropColumns'
 ]

@@ -84,3 +84,50 @@ The `get_all_race_history` output columns have been standardized to snake_case a
 1.  **Update Data Pipeline**: The `data_pipeline.py` and `pipeline_steps/` rely on old column names (e.g., `raceyear`). These must be mapped to the new schema.
 3.  **Training Config**: Update `config/training.json` target column (currently `finishpositiontext`).
 4.  **Notebooks**: Update `race_data_eda.ipynb` to use new columns.
+
+## 4. Pipeline Layer Migration (Completed)
+
+The data pipeline has been updated to work with the new Jolpica schema. This involved:
+
+### New Pipeline Configuration
+A new `config/pipeline_race_history.json` file was created with updated column names that match the Jolpica schema.
+
+### Key Changes
+*   **Column Name Updates**: All pipeline steps now use Jolpica column names (e.g., `raceyear` → `season_year`, `roundnumber` → `round_number`)
+*   **Target Column Change**: Updated target from `finishpositiontext` (text) to `finish_position` (numeric)
+*   **New Features**:
+    *   `is_dnf`: Binary indicator for Did Not Finish (1 if driver did not finish, 0 otherwise)
+    *   `race_time_ms`: Race time converted to milliseconds for numerical processing
+*   **Removed Steps**: 
+    *   `label_encoder` step for `finishpositiontext` (no longer needed as `finish_position` is already numeric)
+
+### Complete Column Name Mapping
+| Concept | Old Column Name | New Column Name |
+|---------|-----------------|-----------------|
+| Round ID | `raceid` | `round_id` |
+| Circuit ID | `circuitid` | `circuit_id` |
+| Season Year | `raceyear` | `season_year` |
+| Round Date | `racedate` | `round_date` |
+| Round Number | `roundnumber` | `round_number` |
+| Round URL | `raceurl` | `round_url` |
+| Team ID | `constructorid` | `team_id` |
+| Team Name | `constructorname` | `team_name` |
+| Driver ID | `driverid` | `driver_id` |
+| Driver Code | `drivercode` | `driver_abbreviation` |
+| Q1 Time | `q1` | `q1_time` |
+| Q2 Time | `q2` | `q2_time` |
+| Q3 Time | `q3` | `q3_time` |
+| Qualifying Position | `qualifyingposition` | `qualifying_position` |
+| Starting Grid | `startinggrid` | `grid` |
+| Finish Position | `finishpositiontext` | `finish_position` |
+| Race Time | `milliseconds` | `time` |
+| Driver Points | `drivertotalpoints` | `driver_championship_points` |
+| Team Points | `constructortotalpoints` | `team_championship_points` |
+| Driver Rank | `driverrank` | `driver_championship_position` |
+| Team Rank | `constructorrank` | `team_championship_position` |
+| Driver Wins | `driverwins` | `driver_wins` |
+| Team Wins | `constructorwins` | `team_wins` |
+| Fastest Lap | `fastestlap` | `fastest_lap_rank` |
+
+### Next Steps
+1.  **Regenerate Model Features**: After running the updated pipeline, the `config/model.json` feature list needs to be updated with the actual output columns.

@@ -1,0 +1,143 @@
+{
+  "pipeline": {
+    "name": "f1_race_data_pipeline",
+    "version": "0.2.0",
+    "description": "Pipeline for processing F1 race data for pit stop strategy modeling (Jolpica schema)",
+    "save_checkpoints": true,
+    "checkpoint_dir": "data/processed",
+    "checkpoint_format": "tsv",
+    "artifacts_dir": "models/artifacts",
+    "steps": [
+      {
+        "name": "null_value_cleaner",
+        "enabled": true,
+        "config": {
+          "strategy": "fill_custom",
+          "fill_values": {
+            "q1_time": "0:00.000",
+            "q2_time": "0:00.000",
+            "q3_time": "0:00.000",
+            "time": "0:00.000",
+            "qualifying_position": 50
+          }
+        }
+      },
+      {
+        "name": "data_type_converter",
+        "enabled": true,
+        "config": {
+          "datetime_columns": ["round_date"],
+          "numeric_columns": ["time", "points", "driver_championship_points", "team_championship_points", "qualifying_position", "driver_championship_position", "team_championship_position"]
+        }
+      },
+      {
+        "name": "qualifying_time_converter",
+        "enabled": true,
+        "config": {
+          "columns": ["q1_time", "q2_time", "q3_time"]
+        }
+      },
+      {
+        "name": "race_time_converter",
+        "enabled": true
+      },
+      {
+        "name": "categorical_encoder",
+        "enabled": true,
+        "config": {
+          "columns": ["circuit_name", "team_name", "driver_abbreviation"],
+          "drop_original": true,
+          "drop_first": true,
+          "sparse_output": false,
+          "handle_unknown": "ignore"
+        }
+      },
+      {
+        "name": "numerical_scaler",
+        "enabled": true,
+        "config": {
+          "columns": ["qualifying_position", "grid", "finish_position", "race_time_ms",
+            "points", "driver_championship_points", "team_championship_points", "driver_championship_position", "driver_wins",
+            "team_championship_position", "team_wins", "q1_seconds", "q2_seconds", "q3_seconds"],
+          "scaler": "standard"
+        }
+      },
+      {
+        "name": "lagged_feature_generator",
+        "enabled": true,
+        "config": {
+          "lag_columns": [
+            "points",
+            "driver_championship_points",
+            "driver_championship_position",
+            "driver_wins",
+            "team_championship_points",
+            "team_championship_position",
+            "team_wins",
+            "race_time_ms"
+          ],
+          "group_columns": [
+            "season_year",
+            "driver_id"
+          ],
+          "sort_columns": ["round_number"],
+          "shift_period": 1,
+          "fill_value": 0,
+          "new_col_prefix": "prev_race_",
+          "drop_original": true
+        }
+      },
+      {
+        "name": "season_progress",
+        "enabled": true
+      },
+      {
+        "name": "dnf_handler",
+        "enabled": true,
+        "config": {
+          "fill_value": 25
+        }
+      },
+      {
+        "name": "z_score_clipper",
+        "enabled": true,
+        "config": {
+          "z_threshold": 3.0,
+          "clipped_value": null,
+          "columns": [
+            "qualifying_position",
+            "grid",
+            "finish_position",
+            "race_time_ms",
+            "points",
+            "driver_championship_points",
+            "team_championship_points"
+          ]
+        }
+      },
+      {
+        "name": "drop_columns",
+        "enabled": true,
+        "config": {
+          "columns": [
+            "round_id",
+            "circuit_id",
+            "season_year",
+            "round_date",
+            "round_number",
+            "round_url",
+            "team_id",
+            "driver_id",
+            "q1_time",
+            "q2_time",
+            "q3_time",
+            "time",
+            "fastest_lap_rank",
+            "status",
+            "status_detail"
+          ]
+        }
+      }
+    ]
+  }
+}
