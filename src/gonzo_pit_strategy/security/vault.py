@@ -75,7 +75,7 @@ class Multipass:
 
         # Load environment variables
         #TODO: change to grabbing secrets from environment instead of .env file
-        env_file = Path(__file__).parent.parent / '.env'
+        env_file = Path(__file__).parent.parent.parent.parent / '.env'
         load_dotenv(env_file)
 
         # Vault configuration

@@ -28,7 +28,8 @@ class DatabaseConfig:
 
         if config_path is None:
             # Find the project root (where .env is located)
-            project_root = Path(__file__).parent.parent
+            # src/gonzo_pit_strategy/db/config.py -> root
+            project_root = Path(__file__).parents[3]
             config_path = project_root / 'config' / 'database.json'
 
         self.config_path = Path(config_path)
@@ -75,7 +76,7 @@ class DatabaseConfig:
         }
 
         # Add credentials from vault
-        from security.credentials import get_database_credentials
+        from gonzo_pit_strategy.security.credentials import get_database_credentials
         try:
             creds = get_database_credentials()
             url_dict['username'] = creds.username

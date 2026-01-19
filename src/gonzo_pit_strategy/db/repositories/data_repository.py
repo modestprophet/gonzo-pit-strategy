@@ -16,8 +16,8 @@ from typing import List, Dict, Any, Optional, TypeVar, Type
 import pandas as pd
 from sqlalchemy import text
 
-from db.base import db_session, Base
-from db.models.f1_models import (
+from gonzo_pit_strategy.db.base import db_session, Base
+from gonzo_pit_strategy.db.models.f1_models import (
     BaseTeam, ChampionshipSystem, PointSystem,
     Season, Circuit, Driver, Team, TeamDriver,
     Round, Session, RoundEntry, SessionEntry,

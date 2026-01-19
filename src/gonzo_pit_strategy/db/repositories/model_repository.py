@@ -10,8 +10,8 @@ import json
 from datetime import datetime
 import tensorflow as tf
 
-from db.base import db_session
-from db.models.model_metadata import ModelMetadata
+from gonzo_pit_strategy.db.base import db_session
+from gonzo_pit_strategy.db.models.model_metadata import ModelMetadata
 from gonzo_pit_strategy.log.logger import get_logger
 
 logger = get_logger(__name__)

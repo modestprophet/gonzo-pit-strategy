@@ -1,4 +1,4 @@
-from db.repositiries.data_repository import F1DataRepository
+from gonzo_pit_strategy.db.repositories.data_repository import F1DataRepository
 
 def main():
     df = F1DataRepository.get_all_race_history()

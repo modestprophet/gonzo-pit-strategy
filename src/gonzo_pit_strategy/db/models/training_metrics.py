@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
-from db.base import Base
+from gonzo_pit_strategy.db.base import Base
 
 
 class TrainingMetric(Base):

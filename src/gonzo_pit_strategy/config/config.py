@@ -48,8 +48,8 @@ class Config:
         """
         # Start from the current file and go up until we find the project root
         current_file = Path(__file__).resolve()
-        # Config directory is directly under the project root
-        return current_file.parent.parent
+        # src/gonzo_pit_strategy/config/config.py -> root
+        return current_file.parents[3]
 
     def get_config(self, config_name: str, reload: bool = False) -> Dict[str, Any]:
         """Get configuration by name.

@@ -4,14 +4,9 @@ Test script for the configuration management system.
 This script tests the basic functionality of the configuration management system.
 """
 import os
-import sys
-from pathlib import Path
 
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
+from gonzo_pit_strategy.config.config import config
 
-from config.config import config
 
 def test_config_loading():
     """Test loading configuration files."""

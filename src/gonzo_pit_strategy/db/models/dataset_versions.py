@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql import func
-from db.base import Base
+from gonzo_pit_strategy.db.base import Base
 
 
 class DatasetVersion(Base):

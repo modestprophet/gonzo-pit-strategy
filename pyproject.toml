@@ -1,9 +1,9 @@
 [project]
 name = "gonzo-pit-strategy"
 version = "0.1.0"
-description = "Add your description here"
+description = "F1 Pit Strategy Prediction"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "dotenv>=0.9.9",
     "hvac>=2.4.0",
@@ -15,3 +15,15 @@ dependencies = [
     "sqlalchemy>=2.0.45",
     "tensorflow>=2.20.0",
 ]
+
+[project.scripts]
+gonzo-train = "gonzo_pit_strategy.cli.train:main"
+gonzo-load = "gonzo_pit_strategy.cli.load_data:main"
+gonzo-start = "gonzo_pit_strategy.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gonzo_pit_strategy"]

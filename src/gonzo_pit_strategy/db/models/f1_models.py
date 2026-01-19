@@ -14,7 +14,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint, Index, ForeignKey, TIMESTAMP
 )
 from sqlalchemy.orm import relationship
-from db.base import Base
+from gonzo_pit_strategy.db.base import Base
 
 
 # =============================================================================

@@ -8,8 +8,8 @@ import os
 import keras
 from keras import layers, models, optimizers
 
-from db.repositories.model_repository import ModelRepository
-from config.config import config
+from gonzo_pit_strategy.db.repositories.model_repository import ModelRepository
+from gonzo_pit_strategy.config.config import config
 
 class ModelBase:
     """Base class for all models."""

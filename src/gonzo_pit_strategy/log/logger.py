@@ -13,7 +13,7 @@ import os
 import sys
 from typing import Dict, Any, Optional
 
-from config.config import config
+from gonzo_pit_strategy.config.config import config
 
 
 class Logger:

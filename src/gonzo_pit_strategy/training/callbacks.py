@@ -5,8 +5,8 @@ from typing import Dict, Any, Optional
 import keras
 from datetime import datetime
 
-from db.models.training_metrics import TrainingMetric
-from db.base import db_session
+from gonzo_pit_strategy.db.models.training_metrics import TrainingMetric
+from gonzo_pit_strategy.db.base import db_session
 
 
 class MetricsLoggingCallback(keras.callbacks.Callback):

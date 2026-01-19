@@ -4,21 +4,16 @@ Command-line interface for training models.
 This module provides a command-line interface for training machine learning models
 using the data from the data pipeline.
 """
-import sys
 import argparse
 import json
-from pathlib import Path
 
-# Add project root to Python path
-project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(project_root))
-
-from training.trainer import train_model
+from gonzo_pit_strategy.training.trainer import train_model
 from gonzo_pit_strategy.log.logger import get_logger
-from config.config import config
+from gonzo_pit_strategy.config.config import config
 
 # Use specific logger name to ensure configuration inheritance when run as script
 logger = get_logger("gonzo_pit_strategy.cli.train")
+
 
 
 def main():
