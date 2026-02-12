@@ -8,6 +8,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "hvac>=2.4.0",
     "keras>=3.13.0",
+    "notebook>=7.5.2",
     "numpy>=2.4.0",
     "pandas>=2.3.3",
     "psycopg2-binary>=2.9.11",
