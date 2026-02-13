@@ -24,8 +24,6 @@ def main():
                         help='Name of the configuration to use (default: training)')
     parser.add_argument('--model-type', type=str, choices=['dense', 'bilstm'],
                         help='Type of model to train (overrides config)')
-    parser.add_argument('--data-version', type=str,
-                        help='Version of data to use (overrides config)')
     parser.add_argument('--epochs', type=int,
                         help='Number of epochs to train (overrides config)')
     parser.add_argument('--batch-size', type=int,
@@ -39,8 +37,6 @@ def main():
     # Override configuration with command-line arguments
     if args.model_type:
         training_config['model_type'] = args.model_type
-    if args.data_version:
-        training_config['data_version'] = args.data_version
     if args.epochs:
         training_config['epochs'] = args.epochs
     if args.batch_size:
@@ -53,7 +49,6 @@ def main():
 
     logger.info(f"Training model with configuration: {args.config_name}")
     logger.info(f"Model type: {training_config['model_type']}")
-    logger.info(f"Data version: {training_config['data_version']}")
     logger.info(f"Epochs: {training_config['epochs']}")
     logger.info(f"Batch size: {training_config['batch_size']}")
 

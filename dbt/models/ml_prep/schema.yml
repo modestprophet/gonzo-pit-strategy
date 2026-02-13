@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  - name: prep_training_dataset
+    description: Final ML-ready training dataset with scaled features and one-hot encoded categoricals
+    columns:
+      - name: finish_position
+        description: Target variable - final race finishing position
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 25
+
+  - name: prep_scaling_params
+    description: Fitted scaler parameters (mean and stddev) for each numeric column
+    columns:
+      - name: column_name
+        tests:
+          - unique
+          - not_null
+      - name: mean_val
+        tests:
+          - not_null
+      - name: stddev_val
+        tests:
+          - not_null
+
+  - name: prep_category_mappings
+    description: Distinct category values for each categorical feature
+    columns:
+      - name: feature
+        tests:
+          - not_null
+      - name: category
+        tests:
+          - not_null

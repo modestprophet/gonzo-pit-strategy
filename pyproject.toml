@@ -5,6 +5,8 @@ description = "F1 Pit Strategy Prediction"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "dbt-core>=1.8.0",
+    "dbt-postgres>=1.8.0",
     "dotenv>=0.9.9",
     "hvac>=2.4.0",
     "keras>=3.13.0",
@@ -19,7 +21,7 @@ dependencies = [
 
 [project.scripts]
 gonzo-train = "gonzo_pit_strategy.cli.train:main"
-gonzo-load = "gonzo_pit_strategy.cli.load_data:main"
+gonzo-load = "gonzo_pit_strategy.utils.db_setup:main"
 gonzo-start = "gonzo_pit_strategy.main:main"
 
 [build-system]

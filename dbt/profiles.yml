@@ -1,0 +1,12 @@
+gonzo_pit_strategy:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('F1DB_HOST', '10.0.20.18') }}"
+      port: 5432
+      user: "{{ env_var('F1DB_USER') }}"
+      pass: "{{ env_var('F1DB_PASSWORD') }}"
+      dbname: f1db
+      schema: f1db
+      threads: 4

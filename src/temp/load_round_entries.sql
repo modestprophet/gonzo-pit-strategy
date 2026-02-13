@@ -1,0 +1,1 @@
+\copy f1db.round_entries FROM '/home/freesample/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_roundentry.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

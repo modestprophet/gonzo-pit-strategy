@@ -1,0 +1,1 @@
+\copy f1db.drivers FROM '/home/freesample/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_driver.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

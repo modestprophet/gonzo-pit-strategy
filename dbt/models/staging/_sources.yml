@@ -1,0 +1,30 @@
+version: 2
+
+sources:
+  - name: f1db
+    description: Jolpica F1 database source tables
+    database: f1db
+    schema: f1db
+    tables:
+      - name: session_entries
+        description: Results from race/qualifying/practice sessions
+      - name: sessions
+        description: Session metadata (race, qualifying, practice)
+      - name: rounds
+        description: Race weekend rounds (Grand Prix events)
+      - name: seasons
+        description: F1 seasons by year
+      - name: circuits
+        description: Racing circuits/tracks
+      - name: round_entries
+        description: Driver entries for each round
+      - name: team_drivers
+        description: Driver-team assignments per season
+      - name: drivers
+        description: F1 drivers
+      - name: teams
+        description: F1 teams/constructors
+      - name: driver_championships
+        description: Driver championship standings
+      - name: team_championships
+        description: Team/constructor championship standings

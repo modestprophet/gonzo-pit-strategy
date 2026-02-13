@@ -4,6 +4,7 @@ Repository for machine learning model management.
 This module provides a repository pattern implementation for managing machine learning models,
 including saving, loading, and retrieving model metadata.
 """
+
 from typing import Dict, Any, Optional, List, Tuple
 import os
 import json
@@ -16,6 +17,7 @@ from gonzo_pit_strategy.log.logger import get_logger
 
 logger = get_logger(__name__)
 
+
 class ModelRepository:
     """Repository for managing machine learning models."""
 
@@ -27,7 +29,9 @@ class ModelRepository:
         """
         self.model_path = model_path
 
-    def save_model(self, model: tf.keras.Model, version: str, metadata: Dict[str, Any]) -> int:
+    def save_model(
+        self, model: tf.keras.Model, version: str, metadata: Dict[str, Any]
+    ) -> int:
         """Save a model and its metadata.
 
         Args:
@@ -41,7 +45,9 @@ class ModelRepository:
         # Save model to disk
         save_path = os.path.join(self.model_path, version)
         os.makedirs(save_path, exist_ok=True)
-        model_file_path = os.path.join(save_path, metadata.get("model_name", "model.keras"))
+        model_file_path = os.path.join(
+            save_path, metadata.get("model_name", "model.keras")
+        )
         model.save(model_file_path)
 
         # Save metadata to database
@@ -56,7 +62,7 @@ class ModelRepository:
                 framework_version=tf.__version__,
                 tags=metadata.get("tags", []),
                 configuration=metadata.get("config", {}),
-                config_source_path=metadata.get("config_path", "")
+                config_source_path=metadata.get("config_path", ""),
             )
             session.add(model_metadata)
             session.commit()
@@ -64,15 +70,101 @@ class ModelRepository:
 
             # Save metadata to JSON file
             with open(os.path.join(save_path, "model_metadata.json"), "w") as f:
-                json.dump({
-                    **metadata,
-                    "model_id": model_metadata.model_id,
-                    "saved_at": datetime.now().isoformat()
-                }, f, indent=2)
+                json.dump(
+                    {
+                        **metadata,
+                        "model_id": model_metadata.model_id,
+                        "saved_at": datetime.now().isoformat(),
+                    },
+                    f,
+                    indent=2,
+                )
 
             return model_metadata.model_id
 
-    def load_model(self, version: str, model_name: Optional[str] = None) -> Tuple[tf.keras.Model, Dict[str, Any]]:
+    def create_placeholder_model(self, version: str, metadata: Dict[str, Any]) -> int:
+        """Create a placeholder model metadata record.
+
+        Args:
+            version: Version string for the model
+            metadata: Dictionary of model metadata
+
+        Returns:
+            model_id: The ID of the created model metadata
+        """
+        with db_session() as session:
+            model_metadata = ModelMetadata(
+                name=metadata.get("model_name", "unnamed_model"),
+                version=version,
+                description=metadata.get("description", ""),
+                created_at=datetime.now(),
+                created_by=metadata.get("created_by", "ModelRepository"),
+                architecture=metadata.get("architecture", "unknown"),
+                framework_version=tf.__version__,
+                tags=metadata.get("tags", []),
+                configuration=metadata.get("config", {}),
+                config_source_path=metadata.get("config_path", ""),
+            )
+            session.add(model_metadata)
+            session.commit()
+            session.refresh(model_metadata)
+            return model_metadata.model_id
+
+    def update_model(
+        self,
+        model_id: int,
+        model: tf.keras.Model,
+        version: str,
+        metadata: Dict[str, Any],
+    ) -> None:
+        """Update an existing model record and save artifacts.
+
+        Args:
+            model_id: The ID of the model to update
+            model: The TensorFlow model to save
+            version: Version string for the model
+            metadata: Dictionary of updated model metadata
+        """
+        # Save model to disk
+        save_path = os.path.join(self.model_path, version)
+        os.makedirs(save_path, exist_ok=True)
+        model_file_path = os.path.join(
+            save_path, metadata.get("model_name", "model.keras")
+        )
+        model.save(model_file_path)
+
+        # Update metadata in database
+        with db_session() as session:
+            model_metadata = (
+                session.query(ModelMetadata).filter_by(model_id=model_id).first()
+            )
+            if model_metadata:
+                # Update fields
+                if "description" in metadata:
+                    model_metadata.description = metadata["description"]
+                if "tags" in metadata:
+                    model_metadata.tags = metadata["tags"]
+                if "config" in metadata:
+                    model_metadata.configuration = metadata["config"]
+                # Add other fields updates as necessary
+
+                session.commit()
+
+        # Save metadata to JSON file
+        with open(os.path.join(save_path, "model_metadata.json"), "w") as f:
+            json.dump(
+                {
+                    **metadata,
+                    "model_id": model_id,
+                    "saved_at": datetime.now().isoformat(),
+                },
+                f,
+                indent=2,
+            )
+
+    def load_model(
+        self, version: str, model_name: Optional[str] = None
+    ) -> Tuple[tf.keras.Model, Dict[str, Any]]:
         """Load a model and its metadata.
 
         Args:
@@ -92,11 +184,13 @@ class ModelRepository:
 
         # Check if metadata file exists
         if not os.path.exists(metadata_path):
-            logger.warning(f"Model metadata not found at {metadata_path}, will use minimal metadata")
+            logger.warning(
+                f"Model metadata not found at {metadata_path}, will use minimal metadata"
+            )
             metadata = {"model_name": model_name or "model.keras"}
         else:
             # Load metadata
-            with open(metadata_path, 'r') as f:
+            with open(metadata_path, "r") as f:
                 metadata = json.load(f)
 
         # Determine model path
@@ -111,7 +205,7 @@ class ModelRepository:
             alternative_paths = [
                 os.path.join(model_dir, "model.keras"),
                 os.path.join(model_dir, "model.h5"),
-                os.path.join(model_dir, "saved_model")
+                os.path.join(model_dir, "saved_model"),
             ]
 
             for alt_path in alternative_paths:
@@ -120,7 +214,9 @@ class ModelRepository:
                     model_path = alt_path
                     break
             else:
-                raise FileNotFoundError(f"Model not found at {model_path} or any alternative locations")
+                raise FileNotFoundError(
+                    f"Model not found at {model_path} or any alternative locations"
+                )
 
         # Load model
         try:
@@ -144,7 +240,9 @@ class ModelRepository:
         with db_session() as session:
             return session.query(ModelMetadata).filter_by(model_id=model_id).first()
 
-    def get_model_metadata_by_version(self, version: str, name: Optional[str] = None) -> Optional[ModelMetadata]:
+    def get_model_metadata_by_version(
+        self, version: str, name: Optional[str] = None
+    ) -> Optional[ModelMetadata]:
         """Get model metadata by version and optionally name.
 
         Args:
@@ -160,7 +258,9 @@ class ModelRepository:
                 query = query.filter_by(name=name)
             return query.first()
 
-    def list_models(self, architecture: Optional[str] = None, tags: Optional[List[str]] = None) -> List[ModelMetadata]:
+    def list_models(
+        self, architecture: Optional[str] = None, tags: Optional[List[str]] = None
+    ) -> List[ModelMetadata]:
         """List available models, optionally filtered by architecture or tags.
 
         Args:
@@ -208,6 +308,7 @@ class ModelRepository:
         model_dir = os.path.join(self.model_path, version)
         if os.path.exists(model_dir):
             import shutil
+
             shutil.rmtree(model_dir)
 
         return True

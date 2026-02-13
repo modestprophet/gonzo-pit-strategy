@@ -15,6 +15,12 @@ tensorboard
 checkpoints/
 checkpoints
 
+target/
+dbt_packages/
+logs/
+
+
+
 uv.lock
 
 # Byte-compiled / optimized / DLL files
