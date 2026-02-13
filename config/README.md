@@ -4,14 +4,12 @@ This directory contains configuration files and utilities for the Gonzo Pit Stra
 
 ## Configuration Files
 
-The project uses several JSON configuration files:
+The project uses the following active configuration files:
 
-- `model.json`: Configuration for model architecture and parameters
-- `training.json`: Configuration for model training
-- `pipeline_race_history.json`: Configuration for the data pipeline
 - `database.json`: Configuration for database connections
-- `inference.json`: Configuration for model inference
 - `logging.json`: Configuration for logging
+
+> **Note**: Training configurations are now generated dynamically or passed via CLI arguments. Generated configs are stored in `config/experiments/`.
 
 ## Configuration Management System
 
@@ -29,12 +27,10 @@ The project uses a centralized configuration management system implemented in `c
 from config.config import config
 
 # Load configuration
-model_config = config.get_config("model")
-training_config = config.get_config("training")
+db_config = config.get_config("database")
 
 # Access configuration values
-model_type = model_config.get("model_type", "dense")
-epochs = training_config.get("epochs", 100)
+host = db_config.get("host")
 
 # Resolve paths relative to project root
 data_path = config.get_path("data/processed")
@@ -68,21 +64,6 @@ absolute_path = config.get_path("data/processed")
 ```
 
 This ensures that paths are correctly resolved regardless of the current working directory.
-
-## Configuration File Format
-
-Configuration files are JSON files with a structure specific to each configuration type. For example, a model configuration might look like:
-
-```json
-{
-  "model_type": "dense",
-  "hidden_layers": [64, 32],
-  "dropout_rate": 0.2,
-  "activation": "relu",
-  "output_activation": "linear",
-  "learning_rate": 0.001
-}
-```
 
 ## Adding a New Configuration
 

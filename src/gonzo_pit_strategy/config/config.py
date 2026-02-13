@@ -1,6 +1,7 @@
 """
 Configuration management utilities for the Gonzo Pit Strategy project.
 """
+
 import os
 import json
 from pathlib import Path
@@ -14,11 +15,7 @@ VALID_ENVIRONMENTS = ["development", "testing", "production"]
 
 # Map configs defined in the project to their respective configuration file names
 CONFIG_FILES = {
-    "model": "model.json",
-    "training": "training.json",
-    "pipeline": "pipeline_race_history.json",
     "database": "database.json",
-    "inference": "inference.json",
     "logging": "logging.json",
 }
 
@@ -86,8 +83,10 @@ class Config:
             Path to the configuration file
         """
         if config_name not in CONFIG_FILES:
-            raise ValueError(f"Unknown configuration: {config_name}. "
-                             f"Available configurations: {list(CONFIG_FILES.keys())}")
+            raise ValueError(
+                f"Unknown configuration: {config_name}. "
+                f"Available configurations: {list(CONFIG_FILES.keys())}"
+            )
 
         return self._config_dir / CONFIG_FILES[config_name]
 
@@ -103,7 +102,7 @@ class Config:
         config_path = self.get_config_path(config_name)
 
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path, "r") as f:
                 parsed_config = json.load(f)
             return parsed_config
         except FileNotFoundError:
@@ -120,7 +119,9 @@ class Config:
         """
         env = os.environ.get(ENV_VAR_APP_ENV, DEFAULT_ENV)
         if env not in VALID_ENVIRONMENTS:
-            print(f"Warning: Invalid environment '{env}'. Using '{DEFAULT_ENV}' instead.")
+            print(
+                f"Warning: Invalid environment '{env}'. Using '{DEFAULT_ENV}' instead."
+            )
             env = DEFAULT_ENV
         return env
 

@@ -1,0 +1,26 @@
+{
+  "target_column": "finish_position",
+  "exclude_columns": [],
+  "test_size": 0.2,
+  "validation_size": 0.1,
+  "random_state": 42,
+  "model": {
+    "type": "dense",
+    "hidden_layers": [
+      64,
+      32
+    ],
+    "dropout_rate": 0.2,
+    "activation": "relu",
+    "output_activation": "linear"
+  },
+  "batch_size": 32,
+  "epochs": 100,
+  "learning_rate": 0.001,
+  "early_stopping_patience": 10,
+  "tags": [
+    "f1",
+    "pit_strategy"
+  ],
+  "description": null
+}

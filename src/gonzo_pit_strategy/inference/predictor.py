@@ -3,14 +3,14 @@ Model inference functionality for F1 pit strategy prediction.
 
 This module provides classes and functions for loading trained models and making predictions.
 """
+
 import os
 import json
 from typing import Dict, Any, Optional, List, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from gonzo_pit_strategy.models.model import get_model
-from gonzo_pit_strategy.training.data_pipeline import DataPipeline
+from gonzo_pit_strategy.config.config import config as app_config
 from gonzo_pit_strategy.db.repositories.model_repository import ModelRepository
 from gonzo_pit_strategy.log.logger import get_logger
 
@@ -20,45 +20,49 @@ logger = get_logger(__name__)
 class ModelPredictor:
     """Class for making predictions with trained models."""
 
-    def __init__(self, model_version: str, model_type: str = 'dense', 
-                 config_path: str = "config/model.json"):
+    def __init__(
+        self,
+        model_version: str,
+        model_type: str = "dense",
+        config_path: Optional[str] = None,
+    ):
         """Initialize the predictor with a trained model.
 
         Args:
             model_version: Version string of the model to load
             model_type: Type of model ('dense', 'bilstm', etc.)
-            config_path: Path to model configuration
+            config_path: Optional path to model configuration (deprecated)
         """
         self.model_version = model_version
         self.model_type = model_type
         self.config_path = config_path
 
-        # Initialize model and repository
-        self.model = get_model(model_type, config_path=config_path)
-        model_path = self.model.model_path
-        self.model_repo = ModelRepository(model_path)
+        # Initialize model repository
+        # Use default path from config if available, otherwise default to models/artifacts
+        model_artifacts_path = str(app_config.get_path("models/artifacts"))
+        self.model_repo = ModelRepository(model_artifacts_path)
 
         # Load model using repository
-        model_keras, self.metadata = self.model_repo.load_model(model_version, self.model.model_name)
-        self.model.model = model_keras  # Set the keras model in our model wrapper
+        # We don't need model_name as load_model can infer it from metadata or defaults
+        self.model, self.metadata = self.model_repo.load_model(model_version)
         logger.info(f"Loaded model from repository: {model_version}")
 
         # Extract feature columns and target column from metadata
-        self.feature_columns = self.metadata.get('feature_columns', [])
-        self.target_column = self.metadata.get('target_column', None)
+        self.feature_columns = self.metadata.get("feature_columns", [])
+        self.target_column = self.metadata.get("target_column", None)
 
         # Check for training metadata (for additional information)
-        model_dir = os.path.join(model_path, model_version)
+        model_dir = os.path.join(model_artifacts_path, model_version)
         training_metadata_path = os.path.join(model_dir, "training_metadata.json")
         if os.path.exists(training_metadata_path):
-            with open(training_metadata_path, 'r') as f:
+            with open(training_metadata_path, "r") as f:
                 self.training_metadata = json.load(f)
             # Get data version from training metadata
-            self.data_version = self.training_metadata.get('data_version', None)
+            self.data_version = self.training_metadata.get("data_version", None)
         else:
             # Try to get data version from model metadata
             self.training_metadata = {}
-            self.data_version = self.metadata.get('data_version', None)
+            self.data_version = self.metadata.get("data_version", None)
 
         # Initialize data pipeline
         self.data_pipeline = None
@@ -69,21 +73,25 @@ class ModelPredictor:
         Args:
             pipeline_config_path: Path to pipeline configuration
         """
-        if self.data_pipeline is None:
-            if pipeline_config_path is None:
-                pipeline_config_path = self.training_metadata.get(
-                    'training_config', {}).get(
-                    'pipeline_config_path', "config/pipeline_race_history.json")
+        logger.warning("DataPipeline is currently disabled due to refactoring.")
+        # if self.data_pipeline is None:
+        #     if pipeline_config_path is None:
+        #         pipeline_config_path = self.training_metadata.get(
+        #             "training_config", {}
+        #         ).get("pipeline_config_path", "config/pipeline_race_history.json")
+        #
+        #     self.data_pipeline = DataPipeline(config_path=pipeline_config_path)
+        #
+        #     # Load artifacts if data version is available
+        #     if self.data_version:
+        #         logger.info(
+        #             f"Loading pipeline artifacts from version: {self.data_version}"
+        #         )
+        #         self.data_pipeline.load_artifacts(self.data_version)
 
-            self.data_pipeline = DataPipeline(config_path=pipeline_config_path)
-
-            # Load artifacts if data version is available
-            if self.data_version:
-                logger.info(f"Loading pipeline artifacts from version: {self.data_version}")
-                self.data_pipeline.load_artifacts(self.data_version)
-
-    def predict(self, data: Union[pd.DataFrame, np.ndarray], 
-                apply_pipeline: bool = False) -> np.ndarray:
+    def predict(
+        self, data: Union[pd.DataFrame, np.ndarray], apply_pipeline: bool = False
+    ) -> np.ndarray:
         """Make predictions with the model.
 
         Args:
@@ -95,20 +103,25 @@ class ModelPredictor:
         """
         # If data is a DataFrame and we need to apply pipeline transformations
         if isinstance(data, pd.DataFrame) and apply_pipeline:
-            self._initialize_pipeline()
-
-            # Apply transformations
-            for step in self.data_pipeline.steps:
-                # Only apply certain steps that are needed for inference
-                if step.name in ["CategoricalEncoder", "NumericalScaler"]:
-                    data = step.process(data)
+            logger.warning("Pipeline application requested but pipeline is disabled.")
+            # self._initialize_pipeline()
+            #
+            # # Apply transformations
+            # for step in self.data_pipeline.steps:
+            #     # Only apply certain steps that are needed for inference
+            #     if step.name in ["CategoricalEncoder", "NumericalScaler"]:
+            #         data = step.process(data)
 
             # Extract features
             if self.feature_columns:
                 # Check if all feature columns are in the data
-                missing_columns = [col for col in self.feature_columns if col not in data.columns]
+                missing_columns = [
+                    col for col in self.feature_columns if col not in data.columns
+                ]
                 if missing_columns:
-                    raise ValueError(f"Feature columns not found in data: {missing_columns}")
+                    raise ValueError(
+                        f"Feature columns not found in data: {missing_columns}"
+                    )
 
                 features = data[self.feature_columns].values
             else:
@@ -120,9 +133,13 @@ class ModelPredictor:
             # Extract features if feature columns are specified
             if self.feature_columns:
                 # Check if all feature columns are in the data
-                missing_columns = [col for col in self.feature_columns if col not in data.columns]
+                missing_columns = [
+                    col for col in self.feature_columns if col not in data.columns
+                ]
                 if missing_columns:
-                    raise ValueError(f"Feature columns not found in data: {missing_columns}")
+                    raise ValueError(
+                        f"Feature columns not found in data: {missing_columns}"
+                    )
 
                 features = data[self.feature_columns].values
             else:
@@ -137,7 +154,9 @@ class ModelPredictor:
 
         return predictions
 
-    def predict_from_checkpoint(self, dataset_name: str, version: str) -> Tuple[pd.DataFrame, np.ndarray]:
+    def predict_from_checkpoint(
+        self, dataset_name: str, version: str
+    ) -> Tuple[pd.DataFrame, np.ndarray]:
         """Make predictions on data from a checkpoint.
 
         Args:
@@ -147,18 +166,21 @@ class ModelPredictor:
         Returns:
             Tuple of (original data, predictions)
         """
-        self._initialize_pipeline()
+        raise NotImplementedError(
+            "Checkpoint loading is currently disabled due to refactoring."
+        )
+        # self._initialize_pipeline()
+        #
+        # # Load data from checkpoint
+        # df = self.data_pipeline.load_checkpoint(dataset_name, version)
+        #
+        # # Make predictions
+        # predictions = self.predict(df, apply_pipeline=False)
+        #
+        # return df, predictions
 
-        # Load data from checkpoint
-        df = self.data_pipeline.load_checkpoint(dataset_name, version)
 
-        # Make predictions
-        predictions = self.predict(df, apply_pipeline=False)
-
-        return df, predictions
-
-
-def load_predictor(model_version: str, model_type: str = 'dense') -> ModelPredictor:
+def load_predictor(model_version: str, model_type: str = "dense") -> ModelPredictor:
     """Load a predictor for a trained model.
 
     Args:

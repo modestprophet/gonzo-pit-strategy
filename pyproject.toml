@@ -3,20 +3,21 @@ name = "gonzo-pit-strategy"
 version = "0.1.0"
 description = "F1 Pit Strategy Prediction"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.9"
 dependencies = [
     "dbt-core>=1.8.0",
     "dbt-postgres>=1.8.0",
     "dotenv>=0.9.9",
     "hvac>=2.4.0",
-    "keras>=3.13.0",
-    "notebook>=7.5.2",
-    "numpy>=2.4.0",
-    "pandas>=2.3.3",
-    "psycopg2-binary>=2.9.11",
-    "scikit-learn>=1.8.0",
-    "sqlalchemy>=2.0.45",
-    "tensorflow>=2.20.0",
+    "keras>=3.0.0",
+    "notebook>=7.0.0",
+    "numpy>=1.26.0",
+    "pandas>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+    "pydantic>=2.0.0",
+    "scikit-learn>=1.0.0",
+    "sqlalchemy>=2.0.0",
+    "tensorflow>=2.15.0",
 ]
 
 [project.scripts]
