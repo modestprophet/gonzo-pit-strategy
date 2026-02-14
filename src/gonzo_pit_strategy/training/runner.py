@@ -7,7 +7,7 @@ import time
 import keras
 from keras import callbacks
 from dataclasses import dataclass
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from gonzo_pit_strategy.training.config import TrainingConfig
 from gonzo_pit_strategy.training.data import load_training_data
@@ -28,19 +28,22 @@ logger = get_logger(__name__)
 @dataclass
 class ExperimentResult:
     model_version: str
-    model_id: int
-    run_id: int
+    model_id: Optional[int]
+    run_id: Optional[int]
     test_loss: float
     test_metrics: Dict[str, float]
     history: Dict[str, Any]
 
 
-def run_experiment(config: TrainingConfig) -> ExperimentResult:
+def run_experiment(
+    config: TrainingConfig, config_path: Optional[str] = None
+) -> ExperimentResult:
     """
     Execute a full training experiment based on the configuration.
 
     Args:
         config: TrainingConfig object.
+        config_path: Path to the configuration file (optional).
 
     Returns:
         ExperimentResult object.
@@ -73,7 +76,9 @@ def run_experiment(config: TrainingConfig) -> ExperimentResult:
     repo = ModelRepository(model_artifacts_path)
 
     # Main Experiment Callback (Handles DB, Artifacts)
-    experiment_cb = GonzoExperimentCallback(config, repo, model_version)
+    experiment_cb = GonzoExperimentCallback(
+        config, repo, model_version, config_path=config_path
+    )
 
     cb_list = [experiment_cb]
 

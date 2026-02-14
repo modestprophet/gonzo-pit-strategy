@@ -15,6 +15,9 @@ from gonzo_pit_strategy.db.models.dataset_versions import (
 from gonzo_pit_strategy.db.repositories.model_repository import ModelRepository
 from gonzo_pit_strategy.db.base import db_session
 from gonzo_pit_strategy.training.config import TrainingConfig
+from gonzo_pit_strategy.log.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class MetricsLoggingCallback(keras.callbacks.Callback):
@@ -132,12 +135,17 @@ class GonzoExperimentCallback(keras.callbacks.Callback):
     """
 
     def __init__(
-        self, config: TrainingConfig, model_repo: ModelRepository, model_version: str
+        self,
+        config: TrainingConfig,
+        model_repo: ModelRepository,
+        model_version: str,
+        config_path: Optional[str] = None,
     ):
         super().__init__()
         self.config = config
         self.repo = model_repo
         self.model_version = model_version
+        self.config_path = config_path
         self.run_id = None
         self.model_id = None
         self.start_time = None
@@ -157,6 +165,7 @@ class GonzoExperimentCallback(keras.callbacks.Callback):
             "architecture": self.config.model.type,
             "tags": self.config.tags,
             "config": self.config.model_dump(),
+            "config_path": self.config_path,
         }
 
         # Create placeholder model
@@ -177,6 +186,9 @@ class GonzoExperimentCallback(keras.callbacks.Callback):
             session.commit()
             session.refresh(run)
             self.run_id = run.run_id
+            logger.info(
+                f"Created TrainingRun ID: {self.run_id} for Model ID: {self.model_id} with config path: {self.config_path}"
+            )
 
         # Initialize metric logger with the new run_id
         self.metric_logger = MetricsLoggingCallback(run_id=self.run_id)
@@ -195,7 +207,17 @@ class GonzoExperimentCallback(keras.callbacks.Callback):
             run = session.query(TrainingRun).filter_by(run_id=self.run_id).one()
             run.end_time = datetime.now()
             run.status = "COMPLETED"
-            # run.epochs_completed is not updated here, relies on logic elsewhere or could be done here if we track it
+
+            # Update epochs_completed by counting distinct epochs from training metrics
+            # TODO:  do we need a DB query to derive the last epoch or could we get that from TF/Keras?
+            epochs_completed = (
+                session.query(TrainingMetric.epoch)
+                .filter_by(run_id=self.run_id)
+                .distinct()
+                .count()
+            )
+            run.epochs_completed = epochs_completed
+
             session.commit()
 
         # Save model artifacts

@@ -173,7 +173,8 @@ def main():
         for i, config in enumerate(configs):
             logger.info(f"Running experiment {i + 1}/{len(configs)}")
             try:
-                result = run_experiment(config)
+                # For grid search, we use the grid search config path as the source
+                result = run_experiment(config, config_path=args.grid_search)
                 results.append(result)
                 logger.info(
                     f"Experiment {i + 1} completed. Test Loss: {result.test_loss}"
@@ -208,8 +209,15 @@ def main():
 
     logger.info(f"Starting experiment with model type: {training_config.model.type}")
 
+    # Determine config source path
+    config_source_path = None
+    if args.config:
+        config_source_path = args.config
+    elif args.config_name:
+        config_source_path = f"config_name:{args.config_name}"
+
     try:
-        result = run_experiment(training_config)
+        result = run_experiment(training_config, config_path=config_source_path)
         logger.info(f"Experiment completed successfully.")
         logger.info(f"Run ID: {result.run_id}")
         logger.info(f"Model Version: {result.model_version}")
