@@ -5,36 +5,31 @@ This module provides the base model class and session context manager
 for database operations.
 """
 from contextlib import contextmanager
-from typing import Generator, TypeVar
+from typing import Generator
 
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import Session
 
 from .connection_pool import ConnectionPool
 
-from gonzo_pit_strategy.log.logger import get_logger
-logger = get_logger(__name__)
+import logging
+logger = logging.getLogger(__name__)
 
 
-# Create base model class
 Base = declarative_base()
-
-# Type variable for models
-T = TypeVar('T', bound=Base)
 
 
 @contextmanager
-def db_session() -> Generator[Session, None, None]:
+def db_session(pool: ConnectionPool) -> Generator[Session, None, None]:
     """Context manager for database sessions.
 
     Yields:
         An SQLAlchemy session
 
     Example:
-        with db_session() as session:
+        with db_session(pool) as session:
             users = session.query(User).all()
     """
-    pool = ConnectionPool()
     session = pool.get_session()
     try:
         yield session
@@ -45,4 +40,3 @@ def db_session() -> Generator[Session, None, None]:
         raise
     finally:
         session.close()
-

@@ -10,11 +10,11 @@ from typing import Dict, Any, Optional, List, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from gonzo_pit_strategy.config.config import config as app_config
+from gonzo_pit_strategy.config.config import AppConfig
 from gonzo_pit_strategy.db.repositories.model_repository import ModelRepository
-from gonzo_pit_strategy.log.logger import get_logger
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class ModelPredictor:
@@ -39,7 +39,7 @@ class ModelPredictor:
 
         # Initialize model repository
         # Use default path from config if available, otherwise default to models/artifacts
-        model_artifacts_path = str(app_config.get_path("models/artifacts"))
+        model_artifacts_path = str(os.path.join(os.getcwd(), "models/artifacts"))
         self.model_repo = ModelRepository(model_artifacts_path)
 
         # Load model using repository
@@ -51,18 +51,11 @@ class ModelPredictor:
         self.feature_columns = self.metadata.get("feature_columns", [])
         self.target_column = self.metadata.get("target_column", None)
 
-        # Check for training metadata (for additional information)
-        model_dir = os.path.join(model_artifacts_path, model_version)
-        training_metadata_path = os.path.join(model_dir, "training_metadata.json")
-        if os.path.exists(training_metadata_path):
-            with open(training_metadata_path, "r") as f:
-                self.training_metadata = json.load(f)
-            # Get data version from training metadata
-            self.data_version = self.training_metadata.get("data_version", None)
-        else:
-            # Try to get data version from model metadata
-            self.training_metadata = {}
-            self.data_version = self.metadata.get("data_version", None)
+        # We don't use training_metadata.json anymore since we dropped the JSON sidecar.
+        # The ModelRepository returns the model from disk and metadata from DB (if integrated properly).
+        # We handle metadata dict as returned.
+        self.training_metadata = {}
+        self.data_version = self.metadata.get("data_version", None)
 
         # Initialize data pipeline
         self.data_pipeline = None
@@ -150,7 +143,7 @@ class ModelPredictor:
             features = data
 
         # Make predictions
-        predictions = self.model.model.predict(features)
+        predictions = self.model.predict(features)
 
         return predictions
 

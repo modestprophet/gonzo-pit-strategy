@@ -31,10 +31,10 @@ import csv
 from pathlib import Path
 from typing import List, Dict
 
-from gonzo_pit_strategy.log.logger import get_logger
+import logging
 from gonzo_pit_strategy.utils.db_utils import get_db_url
 
-logger = get_logger("db_setup")
+logger = logging.getLogger(__name__)
 
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent

@@ -1,1 +1,1 @@
-\copy f1db.point_systems FROM '/home/freesample/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_pointsystem.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');
+\copy f1db.point_systems FROM '/mnt/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_pointsystem.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

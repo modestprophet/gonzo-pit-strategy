@@ -1,50 +1,106 @@
 """
 Data loading and preprocessing for training.
+
+This module owns the seam between raw data extraction and ML-ready feature
+engineering.  The `TrainingDataSource` Protocol defines the interface; concrete
+adapters (e.g. `DatabaseDataSource`) satisfy it.
 """
 
 import pandas as pd
 import numpy as np
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import URL
-from typing import Tuple, List
+from typing import Protocol, Tuple, List
+
 from sklearn.model_selection import train_test_split
 
 from gonzo_pit_strategy.training.config import TrainingConfig
-from gonzo_pit_strategy.db.config import DatabaseConfig
-from gonzo_pit_strategy.log.logger import get_logger
+from gonzo_pit_strategy.config.config import DatabaseConfig
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
-def load_training_data(config: TrainingConfig,) -> Tuple[
+# ---------------------------------------------------------------------------
+# Domain types
+# ---------------------------------------------------------------------------
+
+RawDataset = pd.DataFrame
+"""Untransformed data fetched from a source before any ML-specific feature
+engineering, NaN filling, or dataset splitting occurs."""
+
+
+# ---------------------------------------------------------------------------
+# TrainingDataSource – the seam
+# ---------------------------------------------------------------------------
+
+
+class TrainingDataSource(Protocol):
+    """Interface boundary that provides a RawDataset to the training pipeline.
+
+    Any object with a ``fetch_raw_data`` method returning a ``pd.DataFrame``
+    satisfies this Protocol – no inheritance required.
+    """
+
+    def fetch_raw_data(self) -> RawDataset: ...
+
+
+# ---------------------------------------------------------------------------
+# DatabaseDataSource – the concrete adapter
+# ---------------------------------------------------------------------------
+
+
+class DatabaseDataSource:
+    """Adapter that fetches a RawDataset from a PostgreSQL database.
+
+    The caller (typically the CLI entry point) is responsible for providing
+    a SQLAlchemy Engine, keeping the connection lifecycle contained
+    within the application boundaries.
+    """
+
+    _DEFAULT_QUERY = "SELECT * FROM f1db_ml_prep.prep_training_dataset"
+
+    def __init__(self, engine, *, query: str | None = None) -> None:
+        self._engine = engine
+        self._query = query or self._DEFAULT_QUERY
+
+    def fetch_raw_data(self) -> RawDataset:
+        logger.info(f"Fetching RawDataset via: {self._query}")
+        df = pd.read_sql(text(self._query), self._engine)
+        logger.info(f"RawDataset shape: {df.shape}")
+        return df
+
+
+# ---------------------------------------------------------------------------
+# load_training_data – the deepened module
+# ---------------------------------------------------------------------------
+
+
+def load_training_data(
+    config: TrainingConfig,
+    data_source: TrainingDataSource,
+) -> Tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]
 ]:
     """
-    Load and prepare data for training based on the provided configuration.
+    Transform a RawDataset into train / validation / test splits.
+
+    All data *extraction* is delegated to ``data_source``; this function is
+    purely responsible for feature engineering, NaN handling, and splitting.
 
     Args:
-        config: TrainingConfig object containing data parameters.
+        config: TrainingConfig with target column, exclusions, split sizes.
+        data_source: Any object satisfying the TrainingDataSource protocol.
 
     Returns:
-        Tuple containing:
-        - X_train, X_val, X_test (features)
-        - y_train, y_val, y_test (targets)
-        - feature_names (list of column names used as features)
+        (X_train, X_val, X_test, y_train, y_val, y_test, feature_names)
     """
-    # Connect to database and load dbt-generated training dataset
-    logger.info("Loading training dataset from f1db_ml_prep.prep_training_dataset")
-    db_config = DatabaseConfig()
-    url_dict = db_config.get_db_url_dict()
-    engine = create_engine(URL.create(**url_dict))
-
-    try:
-        df = pd.read_sql("SELECT * FROM f1db_ml_prep.prep_training_dataset", engine)
-    finally:
-        engine.dispose()
-
+    # ---- Fetch ----------------------------------------------------------
+    df: RawDataset = data_source.fetch_raw_data()
     logger.info(f"Data shape: {df.shape}")
 
-    # Convert object dtype columns (typically all-NULL scaled columns) to float, filling NaN with 0
+    # ---- Feature engineering --------------------------------------------
+    # Convert object dtype columns (typically all-NULL scaled columns) to float
     object_cols = df.select_dtypes(include=["object"]).columns.tolist()
     if object_cols:
         logger.info(
@@ -64,23 +120,20 @@ def load_training_data(config: TrainingConfig,) -> Tuple[
     ohe_cols = [
         col
         for col in df.columns
-        if col.startswith(("circuit_", "team_", "driver_"))   # TODO: maybe append _ohe in the dbt pipeline to identify OHE columns instead of hard coding known OHE columns
+        if col.startswith(("circuit_", "team_", "driver_"))  # TODO: maybe append _ohe in the dbt pipeline
         and not col.endswith("_scaled")
     ]
     if ohe_cols:
         logger.info(f"Converting {len(ohe_cols)} one-hot encoded columns to integers")
         df[ohe_cols] = df[ohe_cols].astype(int)
 
-    # Target handling
+    # ---- Target / feature selection ------------------------------------
     if config.target_column not in df.columns:
         raise ValueError(f"Target column '{config.target_column}' not found in data")
 
     y = df[config.target_column].values
 
-    # Feature selection (Exclude logic)
     cols_to_drop = [config.target_column] + config.exclude_columns
-
-    # Filter out columns that might not exist to avoid errors
     cols_to_drop = [col for col in cols_to_drop if col in df.columns]
 
     X_df = df.drop(columns=cols_to_drop)
@@ -91,14 +144,11 @@ def load_training_data(config: TrainingConfig,) -> Tuple[
     logger.info(f"Excluded columns: {config.exclude_columns}")
     logger.info(f"Selected {len(feature_names)} features")
 
-    # Split data
-    # First split off the test set
+    # ---- Train / val / test split --------------------------------------
     X_train_val, X_test, y_train_val, y_test = train_test_split(
         X, y, test_size=config.test_size, random_state=config.random_state
     )
 
-    # Then split the remaining data into train and validation sets
-    # Adjust validation size relative to the remaining data
     val_size_adjusted = config.validation_size / (1 - config.test_size)
     X_train, X_val, y_train, y_val = train_test_split(
         X_train_val,

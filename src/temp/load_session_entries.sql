@@ -1,1 +1,1 @@
-\copy f1db.session_entries FROM '/home/freesample/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_sessionentry.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');
+\copy f1db.session_entries FROM '/mnt/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_sessionentry.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

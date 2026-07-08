@@ -1,1 +1,1 @@
-\copy f1db.penalties FROM '/home/freesample/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_penalty.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');
+\copy f1db.penalties FROM '/mnt/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_penalty.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

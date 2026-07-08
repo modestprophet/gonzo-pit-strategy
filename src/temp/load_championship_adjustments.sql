@@ -1,1 +1,1 @@
-\copy f1db.championship_adjustments FROM '/home/freesample/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_championshipadjustment.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');
+\copy f1db.championship_adjustments FROM '/mnt/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_championshipadjustment.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

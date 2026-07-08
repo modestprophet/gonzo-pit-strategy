@@ -22,7 +22,7 @@ SELECT
     -- Clipped columns (matching the current pipeline config)
     {{ z_score_clip('qualifying_position') }} AS qualifying_position,
     {{ z_score_clip('grid') }} AS grid,
-    {{ z_score_clip('finish_position_filled') }} AS finish_position,
+    finish_position_filled AS finish_position,
     {{ z_score_clip('race_time_ms') }} AS race_time_ms_clipped,
     {{ z_score_clip('points') }} AS points,
     {{ z_score_clip('driver_championship_points') }} AS driver_championship_points,

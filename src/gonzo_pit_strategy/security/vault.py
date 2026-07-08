@@ -7,16 +7,13 @@ authentication, secret retrieval, and renewal of credentials.
 import os
 import hvac
 from hvac import exceptions
-from pathlib import Path
-from dotenv import load_dotenv
 from functools import wraps
 from typing import Optional, Dict, List, Any
 
-from gonzo_pit_strategy.log.logger import get_logger
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
-#TODO: implement handling for various Vault errors
 class VaultError(Exception):
     """Base exception for Vault-related errors."""
     pass
@@ -58,26 +55,11 @@ def handle_vault_errors(func):
 class Multipass:
     """Client for interacting with HashiCorp Vault.
 
-    This class provides a singleton interface to Vault operations,
+    This class provides an interface to Vault operations,
     handling authentication, token renewal, and secret retrieval.
     """
-    _instance: Optional['Multipass'] = None
-
-    def __new__(cls) -> 'Multipass':
-        if cls._instance is None:
-            cls._instance = super(Multipass, cls).__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
 
     def __init__(self) -> None:
-        if self._initialized:
-            return
-
-        # Load environment variables
-        #TODO: change to grabbing secrets from environment instead of .env file
-        env_file = Path(__file__).parent.parent.parent.parent / '.env'
-        load_dotenv(env_file)
-
         # Vault configuration
         self.vault_addr: str = os.environ.get("VAULT_ADDR")
         self.vault_role_id: str = os.environ.get("VAULT_ROLE_ID")
@@ -97,7 +79,6 @@ class Multipass:
         # Start token renewal process
         self._token_expires_at: Optional[int] = None  # Will be set during authentication
 
-        self._initialized = True
         logger.info("Vault client initialized successfully")
 
     def _authenticate(self) -> None:
