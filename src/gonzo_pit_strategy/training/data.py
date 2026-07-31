@@ -6,16 +6,17 @@ engineering.  The `TrainingDataSource` Protocol defines the interface; concrete
 adapters (e.g. `DatabaseDataSource`) satisfy it.
 """
 
+import hashlib
+from dataclasses import dataclass
+
 import pandas as pd
 import numpy as np
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import URL
-from typing import Protocol, Tuple, List
+from sqlalchemy import text
+from typing import Protocol, List
 
 from sklearn.model_selection import train_test_split
 
 from gonzo_pit_strategy.training.config import TrainingConfig
-from gonzo_pit_strategy.config.config import DatabaseConfig
 import logging
 
 logger = logging.getLogger(__name__)
@@ -67,8 +68,30 @@ class DatabaseDataSource:
     def fetch_raw_data(self) -> RawDataset:
         logger.info(f"Fetching RawDataset via: {self._query}")
         df = pd.read_sql(text(self._query), self._engine)
+        df.attrs["source_query"] = self._query
         logger.info(f"RawDataset shape: {df.shape}")
         return df
+
+
+# ---------------------------------------------------------------------------
+# Dataset fingerprint
+# ---------------------------------------------------------------------------
+
+
+def fingerprint_dataset(df: RawDataset, query: str = "") -> str:
+    """Content fingerprint of a RawDataset: same data -> same fingerprint.
+
+    Hashes the schema (column names + dtypes), row count, a content digest,
+    and the source query text. Identifies a DatasetVersion without any
+    upstream (dbt) cooperation.
+    """
+    h = hashlib.sha256()
+    h.update(query.encode())
+    h.update(str(len(df)).encode())
+    for col, dtype in zip(df.columns, df.dtypes):
+        h.update(f"{col}:{dtype};".encode())
+    h.update(str(int(pd.util.hash_pandas_object(df, index=False).sum())).encode())
+    return h.hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -76,56 +99,87 @@ class DatabaseDataSource:
 # ---------------------------------------------------------------------------
 
 
+def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce a RawDataset's columns into the numeric form Keras requires.
+
+    Shared by training and inference: the Artifact Manifest pins *which*
+    columns a model expects and in what order, and this function pins *how*
+    their values are encoded. Applying it in only one of the two places is
+    train/serve skew — the model would see booleans at inference where it saw
+    integers during training.
+
+    Postgres hands back `object` dtype for all-NULL numeric columns and `bool`
+    for the dbt one-hot columns (`prep_ohe_*`), neither of which Keras accepts.
+    """
+    df = df.copy()
+
+    object_cols = df.select_dtypes(include=["object"]).columns.tolist()
+    if object_cols:
+        logger.info(f"Coercing {len(object_cols)} object columns to numeric: {object_cols}")
+        for col in object_cols:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    bool_cols = df.select_dtypes(include=["bool", "boolean"]).columns.tolist()
+    if bool_cols:
+        logger.info(f"Converting {len(bool_cols)} boolean columns to integers")
+        df[bool_cols] = df[bool_cols].astype(int)
+
+    nan_count = int(df.isnull().sum().sum())
+    if nan_count:
+        nan_cols = df.columns[df.isnull().any()].tolist()
+        logger.info(f"Filling {nan_count} NaN values with 0 in columns: {nan_cols}")
+        df = df.fillna(0.0)
+
+    return df
+
+
+@dataclass
+class LoadedData:
+    """ML-ready splits plus the provenance needed for the Artifact Manifest
+    and DatasetVersion record."""
+
+    X_train: np.ndarray
+    X_val: np.ndarray
+    X_test: np.ndarray
+    y_train: np.ndarray
+    y_val: np.ndarray
+    y_test: np.ndarray
+    feature_names: List[str]
+    dataset_fingerprint: str
+    record_count: int
+    feature_count: int
+
+
 def load_training_data(
     config: TrainingConfig,
     data_source: TrainingDataSource,
-) -> Tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]
-]:
+) -> LoadedData:
     """
     Transform a RawDataset into train / validation / test splits.
 
     All data *extraction* is delegated to ``data_source``; this function is
     purely responsible for feature engineering, NaN handling, and splitting.
+    It also fingerprints the RawDataset so the Experiment can record which
+    data it trained on.
 
     Args:
         config: TrainingConfig with target column, exclusions, split sizes.
         data_source: Any object satisfying the TrainingDataSource protocol.
 
     Returns:
-        (X_train, X_val, X_test, y_train, y_val, y_test, feature_names)
+        LoadedData with splits, feature_names (training order), and the
+        dataset fingerprint.
     """
     # ---- Fetch ----------------------------------------------------------
     df: RawDataset = data_source.fetch_raw_data()
     logger.info(f"Data shape: {df.shape}")
 
+    dataset_fingerprint = fingerprint_dataset(df, df.attrs.get("source_query", ""))
+    record_count = len(df)
+
     # ---- Feature engineering --------------------------------------------
-    # Convert object dtype columns (typically all-NULL scaled columns) to float
-    object_cols = df.select_dtypes(include=["object"]).columns.tolist()
-    if object_cols:
-        logger.info(
-            f"Converting {len(object_cols)} object columns to float and filling NaN with 0: {object_cols}"
-        )
-        for col in object_cols:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-
-    # Fill any remaining NaN values with 0
-    nan_count = df.isnull().sum().sum()
-    if nan_count > 0:
-        nan_cols = df.columns[df.isnull().any()].tolist()
-        logger.info(f"Filling {nan_count} NaN values with 0 in columns: {nan_cols}")
-        df = df.fillna(0.0)
-
-    # Convert boolean OHE columns to integers for Keras
-    ohe_cols = [
-        col
-        for col in df.columns
-        if col.startswith(("circuit_", "team_", "driver_"))  # TODO: maybe append _ohe in the dbt pipeline
-        and not col.endswith("_scaled")
-    ]
-    if ohe_cols:
-        logger.info(f"Converting {len(ohe_cols)} one-hot encoded columns to integers")
-        df[ohe_cols] = df[ohe_cols].astype(int)
+    # Identical encoding is applied at inference time (see prepare_features).
+    df = prepare_features(df)
 
     # ---- Target / feature selection ------------------------------------
     if config.target_column not in df.columns:
@@ -161,4 +215,15 @@ def load_training_data(
     logger.info(f"Validation set: {X_val.shape[0]} samples")
     logger.info(f"Test set: {X_test.shape[0]} samples")
 
-    return X_train, X_val, X_test, y_train, y_val, y_test, feature_names
+    return LoadedData(
+        X_train=X_train,
+        X_val=X_val,
+        X_test=X_test,
+        y_train=y_train,
+        y_val=y_val,
+        y_test=y_test,
+        feature_names=feature_names,
+        dataset_fingerprint=dataset_fingerprint,
+        record_count=record_count,
+        feature_count=len(feature_names),
+    )

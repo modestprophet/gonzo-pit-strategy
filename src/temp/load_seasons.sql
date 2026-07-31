@@ -1,1 +1,0 @@
-\copy f1db.seasons FROM '/mnt/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_season.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

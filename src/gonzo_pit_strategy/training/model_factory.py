@@ -4,7 +4,7 @@ Factory for building Keras models based on Pydantic configurations.
 
 import keras
 from keras import layers, models, optimizers
-from typing import Tuple, Union
+from typing import Tuple
 
 from gonzo_pit_strategy.training.config import (
     TrainingConfig,
@@ -64,39 +64,18 @@ def _build_dense(
 def _build_bilstm(
     conf: BiLSTMModelConfig, input_shape: Tuple[int, ...], output_shape: int
 ) -> keras.Model:
-    # LSTM requires 3D input (batch, time, features).
-    # If input is 2D, we might need to reshape or assume it's already 3D.
-    # For now, assuming the input handling logic ensures correct shape
-    # OR we add a Reshape layer if we know the time steps.
-    # But usually, if we use LSTM, our data loader should provide (batch, time, feats).
-    # Since the current data loader produces 2D data (rows, features),
-    # feeding it to LSTM directly without Reshape won't work unless we treat it as 1 timestep.
-
+    # LSTM needs 3D input (batch, time, features). `load_training_data` produces
+    # 2D (rows, features), so each row is treated as a length-1 sequence.
     inputs = layers.Input(shape=input_shape)
     x = inputs
 
-    # If input is 1D (features only), expand dims to (1, features) for LSTM
-    # This treats each sample as a sequence of length 1.
     if len(input_shape) == 1:
         x = layers.Reshape((1, input_shape[0]))(x)
 
     for i, units in enumerate(conf.lstm_units):
-        return_sequences = (i < len(conf.lstm_units) - 1) or (
-            len(conf.dense_layers) > 0
-        )
-        # If we have dense layers after, we might want return_sequences=False on the last LSTM
-        # unless we want to process the sequence in Dense layers (which is rare for this use case).
-        # Typically: LSTM -> ... -> LSTM (last) -> Dense
-        # If last LSTM, return_sequences=False (default is False in Keras if not specified, but we need to control it)
-
-        # Actually, let's follow the logic:
-        # If it's NOT the last LSTM layer, return_sequences=True.
-        # If it IS the last LSTM layer, return_sequences=False.
+        # Intermediate layers pass the whole sequence on; the last one collapses
+        # it to a single vector for the dense head.
         is_last_lstm = i == len(conf.lstm_units) - 1
-
-        # However, the config logic in original model.py was:
-        # return_sequences = i < len(lstm_units) - 1
-        # This implies the last LSTM layer returns only the last output (2D).
 
         x = layers.Bidirectional(
             layers.LSTM(

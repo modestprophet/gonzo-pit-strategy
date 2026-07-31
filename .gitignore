@@ -19,7 +19,7 @@ target/
 dbt_packages/
 logs/
 
-
+.claude/
 
 uv.lock
 
@@ -156,6 +156,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv*/
 env/
 venv/
 ENV/

@@ -16,6 +16,7 @@ from gonzo_pit_strategy.training.config import TrainingConfig
 from gonzo_pit_strategy.training.runner import Experiment, ExperimentResult
 from gonzo_pit_strategy.training.data import TrainingDataSource
 from gonzo_pit_strategy.db.connection_pool import ConnectionPool
+from gonzo_pit_strategy.config.config import PathsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +60,13 @@ class Sweep:
         data_source: TrainingDataSource,
         db_pool: ConnectionPool,
         config_path: Optional[str] = None,
+        paths: Optional[PathsConfig] = None,
     ):
         self.config = config
         self.data_source = data_source
         self.db_pool = db_pool
         self.config_path = config_path
+        self.paths = paths
 
     def _generate_configs(self) -> List[TrainingConfig]:
         keys = list(self.config.parameters.keys())
@@ -114,6 +117,7 @@ class Sweep:
                     data_source=self.data_source,
                     db_pool=self.db_pool,
                     config_path=self.config_path,
+                    paths=self.paths,
                 )
                 result = experiment.run()
                 yield SweepIterationResult(

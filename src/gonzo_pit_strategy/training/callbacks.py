@@ -3,20 +3,20 @@
 from typing import Dict, Any, Optional
 import keras
 from datetime import datetime
-import json
 
 from gonzo_pit_strategy.db.models.training_metrics import TrainingMetric
 from gonzo_pit_strategy.db.models.training_runs import TrainingRun
-from gonzo_pit_strategy.db.models.dataset_versions import DatasetVersion  # Needed for FK resolution
+from gonzo_pit_strategy.db.models.dataset_versions import DatasetVersion
 from gonzo_pit_strategy.db.repositories.model_repository import ModelRepository
 from gonzo_pit_strategy.db.base import db_session
+from gonzo_pit_strategy.db.connection_pool import ConnectionPool
 from gonzo_pit_strategy.training.config import TrainingConfig
+from gonzo_pit_strategy.training.artifact import ArtifactManifest, ArtifactStore
+from gonzo_pit_strategy.training.data import LoadedData
 import logging
 
 logger = logging.getLogger(__name__)
 
-
-from gonzo_pit_strategy.db.connection_pool import ConnectionPool
 
 class MetricsLoggingCallback(keras.callbacks.Callback):
     """Logs training metrics to the database at each epoch end."""
@@ -72,18 +72,22 @@ class ConsoleMetricsCallback(keras.callbacks.Callback):
 
 
 class GonzoExperimentCallback(keras.callbacks.Callback):
-    """Full experiment lifecycle manager as a Keras callback.
-    - Creates placeholder model record on_train_begin
-    - Creates TrainingRun record on_train_begin
+    """Experiment lifecycle manager as a Keras callback (ADR 0002).
+    - Creates a TrainingRun record on_train_begin (status RUNNING, no model row yet)
     - Delegates per-epoch metric logging to MetricsLoggingCallback
-    - Updates run status and saves artifacts on_train_end
+    - On train end: saves the self-describing Artifact (model + manifest),
+      then mirrors it to the database once (ModelMetadata + DatasetVersion),
+      and finalizes the TrainingRun.
     """
-    
+
     def __init__(self, config: TrainingConfig, model_repo: ModelRepository,
+                 artifact_store: ArtifactStore, loaded_data: LoadedData,
                  model_version: str, db_pool: ConnectionPool, config_path: Optional[str] = None):
         super().__init__()
         self.config = config
         self.repo = model_repo
+        self.artifact_store = artifact_store
+        self.loaded_data = loaded_data
         self.model_version = model_version
         self.db_pool = db_pool
         self.config_path = config_path
@@ -94,20 +98,9 @@ class GonzoExperimentCallback(keras.callbacks.Callback):
 
     def on_train_begin(self, logs=None):
         self.start_time = datetime.now()
-        metadata = {
-            "model_name": "f1_pit_strategy_model.keras",
-            "model_version": self.model_version,
-            "description": self.config.description or f"{self.config.model.type} model",
-            "created_by": "GonzoExperimentCallback",
-            "architecture": self.config.model.type,
-            "tags": self.config.tags,
-            "config": self.config.model_dump(),
-            "config_path": self.config_path,
-        }
         with db_session(self.db_pool) as session:
-            self.model_id = self.repo.create_placeholder_model(self.model_version, metadata, session)
             run = TrainingRun(
-                model_id=self.model_id, dataset_version_id=None,
+                model_id=None, dataset_version_id=None,
                 start_time=self.start_time, status="RUNNING",
                 epochs_completed=0, early_stopping=True, environment_id="local",
             )
@@ -120,24 +113,53 @@ class GonzoExperimentCallback(keras.callbacks.Callback):
         if self.metric_logger and logs:
             self.metric_logger.on_epoch_end(epoch, logs)
 
+    def _upsert_dataset_version(self, session) -> int:
+        fingerprint = self.loaded_data.dataset_fingerprint
+        version = fingerprint[:16]
+        existing = (session.query(DatasetVersion)
+                    .filter_by(dataset_name="prep_training_dataset", version=version)
+                    .first())
+        if existing:
+            return existing.dataset_version_id
+        dv = DatasetVersion(
+            dataset_name="prep_training_dataset",
+            version=version,
+            description=f"Content fingerprint {fingerprint}",
+            created_by="GonzoExperimentCallback",
+            record_count=self.loaded_data.record_count,
+            feature_count=self.loaded_data.feature_count,
+        )
+        session.add(dv)
+        session.flush()
+        return dv.dataset_version_id
+
     def on_train_end(self, logs=None):
-        if self.run_id is None or self.model_id is None:
+        if self.run_id is None:
             return
+
+        manifest = ArtifactManifest(
+            model_name="f1_pit_strategy_model",
+            model_version=self.model_version,
+            architecture=self.config.model.type,
+            feature_names=self.loaded_data.feature_names,
+            target_column=self.config.target_column,
+            training_config=self.config.model_dump(mode="json"),
+            framework_version=keras.__version__,
+            dataset_fingerprint=self.loaded_data.dataset_fingerprint,
+            created_by="GonzoExperimentCallback",
+            description=self.config.description or f"{self.config.model.type} model",
+            tags=self.config.tags,
+        )
+        artifact_dir = self.artifact_store.save(self.model, manifest)
+
         with db_session(self.db_pool) as session:
+            self.model_id = self.repo.record_model(
+                manifest, str(artifact_dir), session, config_source_path=self.config_path
+            )
             run = session.query(TrainingRun).filter_by(run_id=self.run_id).one()
+            run.model_id = self.model_id
+            run.dataset_version_id = self._upsert_dataset_version(session)
             run.end_time = datetime.now()
             run.status = "COMPLETED"
-            epochs_completed = (session.query(TrainingMetric.epoch)
+            run.epochs_completed = (session.query(TrainingMetric.epoch)
                 .filter_by(run_id=self.run_id).distinct().count())
-            run.epochs_completed = epochs_completed
-            
-            metadata = {
-                "model_name": "f1_pit_strategy_model.keras",
-                "model_version": self.model_version,
-                "description": self.config.description or f"{self.config.model.type} model",
-                "created_by": "GonzoExperimentCallback",
-                "architecture": self.config.model.type,
-                "tags": self.config.tags,
-                "config": self.config.model_dump(),
-            }
-            self.repo.update_model(self.model_id, self.model, self.model_version, metadata, session)

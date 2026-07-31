@@ -4,9 +4,8 @@ This module provides a client for interacting with HashiCorp Vault, including
 authentication, secret retrieval, and renewal of credentials.
 """
 
-import os
 import hvac
-from hvac import exceptions
+import hvac.exceptions
 from functools import wraps
 from typing import Optional, Dict, List, Any
 
@@ -59,17 +58,20 @@ class Multipass:
     handling authentication, token renewal, and secret retrieval.
     """
 
-    def __init__(self) -> None:
-        # Vault configuration
-        self.vault_addr: str = os.environ.get("VAULT_ADDR")
-        self.vault_role_id: str = os.environ.get("VAULT_ROLE_ID")
-        self.vault_secret_id: str = os.environ.get("VAULT_SECRET_ID")
+    def __init__(self, url: str, role_id: str, secret_id: str) -> None:
+        """Initialize a Vault client.
+
+        Credentials are injected by the caller (ADR 0001 §1) — this class does
+        not read the environment. `AppConfig.vault` is the source of truth.
+        """
+        self.vault_addr: str = url
+        self.vault_role_id: str = role_id
+        self.vault_secret_id: str = secret_id
 
         if not all([self.vault_addr, self.vault_role_id, self.vault_secret_id]):
-            logger.error("Vault environment variables not set")
             raise VaultAuthenticationError(
-                "Missing required environment variables: "
-                "VAULT_ADDR, VAULT_ROLE_ID, VAULT_SECRET_ID"
+                "Vault requires addr, role_id and secret_id "
+                "(set VAULT__ADDR, VAULT__ROLE_ID, VAULT__SECRET_ID)"
             )
 
         # Initialize Vault client

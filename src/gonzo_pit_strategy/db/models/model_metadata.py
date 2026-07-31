@@ -15,10 +15,10 @@ class ModelMetadata(Base):
     created_by = Column(String(100))
     architecture = Column(Text)
     framework_version = Column(String(50))
-    repository_link = Column(String(255))
     tags = Column(ARRAY(Text))
     configuration = Column(JSONB)
     config_source_path = Column(String(255))
+    artifact_path = Column(String(255))
 
     __table_args__ = (
         UniqueConstraint('name', 'version', name='uix_name_version'),

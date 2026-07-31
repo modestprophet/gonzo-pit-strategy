@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: feat_dnf_handled
+    description: >
+      Race entries with DNF handling applied. This is the input to feat_lagged,
+      whose LAG() window partitions by (season_year, driver_id) and orders by
+      round_number — so that combination must be unique for the lagged features
+      to be deterministic.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - driver_id
+              - round_number
+          config:
+            severity: warn
+
+  - name: feat_lagged
+    description: >
+      Previous-race features via LAG() over (season_year, driver_id) ordered by
+      round_number. KNOWN LIMITATION: prev_race_points, prev_race_team_wins and
+      prev_race_race_time_ms are non-deterministic for the 172 rows (83 groups,
+      seasons 1950-1964) where a driver has more than one entry in a single
+      round — historical shared drives. SQL does not define which tied row LAG
+      returns, so the result depends on physical row order and differs between
+      any two independently-built databases.
+
+      Because prep_scaled standardises with AVG/STDDEV_POP OVER(), those 172
+      ambiguous rows shift the mean and stddev and therefore perturb all 25,873
+      rows of the three affected columns — the blast radius is the whole column,
+      not just the tied rows.
+
+      Accepted rather than fixed: filtering to seasons >= 2008 removes every
+      tied group (the latest is 1964), which makes the lag key unique and the
+      output deterministic. The warn-severity test on feat_dnf_handled tracks
+      this; when it goes green, the limitation is gone. Do not treat a dataset
+      fingerprint computed while it is failing as a reproducible baseline.

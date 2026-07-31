@@ -1,5 +1,4 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, UniqueConstraint
-from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql import func
 from gonzo_pit_strategy.db.base import Base
 
@@ -13,10 +12,8 @@ class DatasetVersion(Base):
     description = Column(Text)
     created_at = Column(DateTime, nullable=False, default=func.current_timestamp())
     created_by = Column(String(100))
-    data_path = Column(String(255))
     record_count = Column(Integer)
     feature_count = Column(Integer)
-    preprocessing_steps = Column(ARRAY(Text))
 
     __table_args__ = (
         UniqueConstraint('dataset_name', 'version', name='uix_dataset_name_version'),

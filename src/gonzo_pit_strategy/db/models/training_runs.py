@@ -7,7 +7,7 @@ class TrainingRun(Base):
     __tablename__ = 'training_runs'
 
     run_id = Column(Integer, primary_key=True)
-    model_id = Column(Integer, ForeignKey('f1db.model_metadata.model_id', ondelete='CASCADE'), nullable=False)
+    model_id = Column(Integer, ForeignKey('f1db.model_metadata.model_id', ondelete='CASCADE'), nullable=True)
     dataset_version_id = Column(Integer, ForeignKey('f1db.dataset_versions.dataset_version_id'))
     start_time = Column(DateTime, nullable=False, default=func.current_timestamp())
     end_time = Column(DateTime)

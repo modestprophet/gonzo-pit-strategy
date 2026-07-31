@@ -11,8 +11,8 @@ CREATE TABLE f1db.application_logs (
     correlation_id VARCHAR(100),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_app_logs_timestamp ON application_logs(timestamp);
-CREATE INDEX idx_app_logs_level ON application_logs(level);
+CREATE INDEX idx_app_logs_timestamp ON f1db.application_logs(timestamp);
+CREATE INDEX idx_app_logs_level ON f1db.application_logs(level);
 
 -- Dataset Versions
 CREATE TABLE f1db.dataset_versions (
@@ -49,8 +49,8 @@ CREATE TABLE f1db.model_metadata (
 -- Training Runs
 CREATE TABLE f1db.training_runs (
     run_id SERIAL PRIMARY KEY,
-    model_id INTEGER NOT NULL REFERENCES model_metadata(model_id) ON DELETE CASCADE,
-    dataset_version_id INTEGER REFERENCES dataset_versions(dataset_version_id),
+    model_id INTEGER NOT NULL REFERENCES f1db.model_metadata(model_id) ON DELETE CASCADE,
+    dataset_version_id INTEGER REFERENCES f1db.dataset_versions(dataset_version_id),
     start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     end_time TIMESTAMP,
     status VARCHAR(20) CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')),
@@ -62,7 +62,7 @@ CREATE TABLE f1db.training_runs (
 -- Training Metrics
 CREATE TABLE f1db.training_metrics (
     metric_id SERIAL PRIMARY KEY,
-    run_id INTEGER NOT NULL REFERENCES training_runs(run_id) ON DELETE CASCADE,
+    run_id INTEGER NOT NULL REFERENCES f1db.training_runs(run_id) ON DELETE CASCADE,
     epoch INTEGER NOT NULL,
     timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     metric_name VARCHAR(100) NOT NULL,

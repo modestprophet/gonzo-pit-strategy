@@ -1,1 +1,0 @@
-\copy f1db.championship_systems FROM '/mnt/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_championshipsystem.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

@@ -27,6 +27,10 @@ END$$;
 -- Grant privileges to application user
 GRANT USAGE ON SCHEMA f1db TO {{APP_USERNAME}};
 GRANT CONNECT ON DATABASE {{DB_NAME}} TO {{APP_USERNAME}};
+-- dbt materializes into its own schemas (f1db_staging, f1db_intermediate,
+-- f1db_features, f1db_ml_prep) and creates them on first run, so the app role
+-- needs CREATE on the database, not just on the f1db schema.
+GRANT CREATE ON DATABASE {{DB_NAME}} TO {{APP_USERNAME}};
 GRANT ALL PRIVILEGES ON SCHEMA f1db TO {{APP_USERNAME}};
 ALTER DEFAULT PRIVILEGES IN SCHEMA f1db GRANT ALL PRIVILEGES ON TABLES TO {{APP_USERNAME}};
 ALTER DEFAULT PRIVILEGES IN SCHEMA f1db GRANT ALL PRIVILEGES ON SEQUENCES TO {{APP_USERNAME}};

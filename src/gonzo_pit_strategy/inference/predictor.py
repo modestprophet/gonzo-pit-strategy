@@ -1,186 +1,57 @@
 """
-Model inference functionality for F1 pit strategy prediction.
+Model inference for F1 pit strategy prediction.
 
-This module provides classes and functions for loading trained models and making predictions.
+Rehydrates models from self-describing artifact directories (ADR 0002):
+the Artifact Manifest supplies the feature-ordering contract, so no
+database connection is required for inference.
 """
 
-import os
-import json
-from typing import Dict, Any, Optional, List, Tuple, Union
+from typing import Optional, Union
+
 import numpy as np
 import pandas as pd
 
-from gonzo_pit_strategy.config.config import AppConfig
-from gonzo_pit_strategy.db.repositories.model_repository import ModelRepository
+from gonzo_pit_strategy.config.config import PathsConfig
+from gonzo_pit_strategy.training.artifact import ArtifactStore
+from gonzo_pit_strategy.training.data import prepare_features
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class ModelPredictor:
-    """Class for making predictions with trained models."""
+    """Makes predictions with a trained model rehydrated from its Artifact."""
 
-    def __init__(
-        self,
-        model_version: str,
-        model_type: str = "dense",
-        config_path: Optional[str] = None,
-    ):
-        """Initialize the predictor with a trained model.
-
-        Args:
-            model_version: Version string of the model to load
-            model_type: Type of model ('dense', 'bilstm', etc.)
-            config_path: Optional path to model configuration (deprecated)
-        """
+    def __init__(self, model_version: str, store: ArtifactStore):
         self.model_version = model_version
-        self.model_type = model_type
-        self.config_path = config_path
+        self.model, self.manifest = store.load(model_version)
+        self.feature_columns = self.manifest.feature_names
+        self.target_column = self.manifest.target_column
 
-        # Initialize model repository
-        # Use default path from config if available, otherwise default to models/artifacts
-        model_artifacts_path = str(os.path.join(os.getcwd(), "models/artifacts"))
-        self.model_repo = ModelRepository(model_artifacts_path)
-
-        # Load model using repository
-        # We don't need model_name as load_model can infer it from metadata or defaults
-        self.model, self.metadata = self.model_repo.load_model(model_version)
-        logger.info(f"Loaded model from repository: {model_version}")
-
-        # Extract feature columns and target column from metadata
-        self.feature_columns = self.metadata.get("feature_columns", [])
-        self.target_column = self.metadata.get("target_column", None)
-
-        # We don't use training_metadata.json anymore since we dropped the JSON sidecar.
-        # The ModelRepository returns the model from disk and metadata from DB (if integrated properly).
-        # We handle metadata dict as returned.
-        self.training_metadata = {}
-        self.data_version = self.metadata.get("data_version", None)
-
-        # Initialize data pipeline
-        self.data_pipeline = None
-
-    def _initialize_pipeline(self, pipeline_config_path: Optional[str] = None):
-        """Initialize the data pipeline.
-
-        Args:
-            pipeline_config_path: Path to pipeline configuration
-        """
-        logger.warning("DataPipeline is currently disabled due to refactoring.")
-        # if self.data_pipeline is None:
-        #     if pipeline_config_path is None:
-        #         pipeline_config_path = self.training_metadata.get(
-        #             "training_config", {}
-        #         ).get("pipeline_config_path", "config/pipeline_race_history.json")
-        #
-        #     self.data_pipeline = DataPipeline(config_path=pipeline_config_path)
-        #
-        #     # Load artifacts if data version is available
-        #     if self.data_version:
-        #         logger.info(
-        #             f"Loading pipeline artifacts from version: {self.data_version}"
-        #         )
-        #         self.data_pipeline.load_artifacts(self.data_version)
-
-    def predict(
-        self, data: Union[pd.DataFrame, np.ndarray], apply_pipeline: bool = False
-    ) -> np.ndarray:
-        """Make predictions with the model.
-
-        Args:
-            data: Input data (DataFrame or numpy array)
-            apply_pipeline: Whether to apply pipeline transformations
-
-        Returns:
-            Predictions as numpy array
-        """
-        # If data is a DataFrame and we need to apply pipeline transformations
-        if isinstance(data, pd.DataFrame) and apply_pipeline:
-            logger.warning("Pipeline application requested but pipeline is disabled.")
-            # self._initialize_pipeline()
-            #
-            # # Apply transformations
-            # for step in self.data_pipeline.steps:
-            #     # Only apply certain steps that are needed for inference
-            #     if step.name in ["CategoricalEncoder", "NumericalScaler"]:
-            #         data = step.process(data)
-
-            # Extract features
-            if self.feature_columns:
-                # Check if all feature columns are in the data
-                missing_columns = [
-                    col for col in self.feature_columns if col not in data.columns
-                ]
-                if missing_columns:
-                    raise ValueError(
-                        f"Feature columns not found in data: {missing_columns}"
-                    )
-
-                features = data[self.feature_columns].values
-            else:
-                # If no feature columns specified, use all columns
-                features = data.values
-
-        # If data is already a numpy array or we don't need to apply pipeline transformations
-        elif isinstance(data, pd.DataFrame):
-            # Extract features if feature columns are specified
-            if self.feature_columns:
-                # Check if all feature columns are in the data
-                missing_columns = [
-                    col for col in self.feature_columns if col not in data.columns
-                ]
-                if missing_columns:
-                    raise ValueError(
-                        f"Feature columns not found in data: {missing_columns}"
-                    )
-
-                features = data[self.feature_columns].values
-            else:
-                # If no feature columns specified, use all columns
-                features = data.values
+    def predict(self, data: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
+        """Predict on a DataFrame (columns reordered to the training contract
+        and encoded exactly as in training) or a numpy array (assumed already
+        in training feature order and numeric)."""
+        if isinstance(data, pd.DataFrame):
+            missing_columns = [
+                col for col in self.feature_columns if col not in data.columns
+            ]
+            if missing_columns:
+                raise ValueError(
+                    f"Feature columns not found in data: {missing_columns}"
+                )
+            # Same encoding as training — otherwise the model sees booleans and
+            # object dtypes where it was trained on integers and floats.
+            features = prepare_features(data[self.feature_columns]).values
         else:
-            # Data is already a numpy array
             features = data
 
-        # Make predictions
-        predictions = self.model.predict(features)
-
-        return predictions
-
-    def predict_from_checkpoint(
-        self, dataset_name: str, version: str
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
-        """Make predictions on data from a checkpoint.
-
-        Args:
-            dataset_name: Name of the dataset
-            version: Version string of the checkpoint
-
-        Returns:
-            Tuple of (original data, predictions)
-        """
-        raise NotImplementedError(
-            "Checkpoint loading is currently disabled due to refactoring."
-        )
-        # self._initialize_pipeline()
-        #
-        # # Load data from checkpoint
-        # df = self.data_pipeline.load_checkpoint(dataset_name, version)
-        #
-        # # Make predictions
-        # predictions = self.predict(df, apply_pipeline=False)
-        #
-        # return df, predictions
+        return self.model.predict(features)
 
 
-def load_predictor(model_version: str, model_type: str = "dense") -> ModelPredictor:
-    """Load a predictor for a trained model.
-
-    Args:
-        model_version: Version string of the model to load
-        model_type: Type of model ('dense', 'bilstm', etc.)
-
-    Returns:
-        ModelPredictor instance
-    """
-    return ModelPredictor(model_version=model_version, model_type=model_type)
+def load_predictor(
+    model_version: str, paths: Optional[PathsConfig] = None
+) -> ModelPredictor:
+    """Load a predictor for a trained model from the configured artifact root."""
+    paths = paths or PathsConfig()
+    return ModelPredictor(model_version, ArtifactStore(paths.artifacts_root))

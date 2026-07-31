@@ -1,1 +1,0 @@
-\copy f1db.base_teams FROM '/mnt/projects/github.com/modestprophet/gonzo-pit-strategy/data/raw/formula_one_baseteam.csv' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');

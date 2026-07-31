@@ -6,14 +6,13 @@ import argparse
 import json
 import os
 import sys
-from typing import Dict, Any, List
 
 from gonzo_pit_strategy.training.config import TrainingConfig
 from gonzo_pit_strategy.training.runner import Experiment
 from gonzo_pit_strategy.training.sweep import SweepConfig, Sweep
 from gonzo_pit_strategy.training.data import DatabaseDataSource
 import logging
-from gonzo_pit_strategy.config.config import AppConfig
+from gonzo_pit_strategy.config.config import AppConfig, setup_logging
 from gonzo_pit_strategy.db.connection_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
@@ -22,9 +21,7 @@ logger = logging.getLogger(__name__)
 def main():
     """Main entry point for the training CLI."""
     app_config = AppConfig()
-    pool = ConnectionPool(app_config.db)
-
-    data_source = DatabaseDataSource(pool.engine)
+    setup_logging(app_config.logging)
 
     parser = argparse.ArgumentParser(
         description="Train a model for F1 pit strategy prediction"
@@ -42,15 +39,19 @@ def main():
 
     args = parser.parse_args()
 
+    # Generating a template needs no database, so this runs before the pool.
     if args.generate_default:
         config = TrainingConfig()
-        output_dir = os.path.join(os.getcwd(), "config/experiments")
+        output_dir = app_config.paths.experiments_dir
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "training_config_default.json")
         with open(output_path, "w") as f:
             f.write(config.model_dump_json(indent=2))
         logger.info(f"Default config written to {output_path}")
         return
+
+    pool = ConnectionPool(app_config.db)
+    data_source = DatabaseDataSource(pool.engine)
 
     config_dict = {}
 
@@ -78,7 +79,7 @@ def main():
             logger.error(f"Invalid base configuration for sweep: {e}")
             sys.exit(1)
 
-        sweep = Sweep(sweep_config, data_source, pool, config_path=args.grid_search)
+        sweep = Sweep(sweep_config, data_source, pool, config_path=args.grid_search, paths=app_config.paths)
 
         results = []
         for iteration in sweep.run():
@@ -111,9 +112,9 @@ def main():
     config_source_path = args.config if args.config else None
 
     try:
-        experiment = Experiment(training_config, data_source, pool, config_path=config_source_path)
+        experiment = Experiment(training_config, data_source, pool, config_path=config_source_path, paths=app_config.paths)
         result = experiment.run()
-        logger.info(f"Experiment completed successfully.")
+        logger.info("Experiment completed successfully.")
         logger.info(f"Run ID: {result.run_id}")
         logger.info(f"Model Version: {result.model_version}")
         logger.info(f"Test Loss: {result.test_loss}")

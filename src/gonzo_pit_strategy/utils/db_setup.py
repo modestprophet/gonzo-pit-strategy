@@ -27,20 +27,21 @@ import os
 import sys
 import argparse
 import subprocess
-import csv
+import tempfile
 from pathlib import Path
-from typing import List, Dict
 
 import logging
+from gonzo_pit_strategy.config.config import AppConfig, setup_logging
 from gonzo_pit_strategy.utils.db_utils import get_db_url
 
 logger = logging.getLogger(__name__)
 
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-MIGRATIONS_DIR = PROJECT_ROOT / "gonzo_pit_strategy" / "db" / "migrations"
-DATA_DIR = PROJECT_ROOT / "data" / "raw"
-INIT_SQL_PATH = PROJECT_ROOT / "gonzo_pit_strategy" / "db" / "init_db.sql"
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent      # src/gonzo_pit_strategy
+REPO_ROOT = PACKAGE_ROOT.parent.parent                     # repository root
+MIGRATIONS_DIR = PACKAGE_ROOT / "db" / "migrations"
+INIT_SQL_PATH = PACKAGE_ROOT / "db" / "init_db.sql"
+DATA_DIR = REPO_ROOT / "data" / "raw"
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,9 +85,11 @@ def initialize_database(args: argparse.Namespace) -> bool:
     sql = sql.replace("{{APP_USERNAME}}", args.app_username)
     sql = sql.replace("{{APP_PASSWORD}}", args.app_password)
 
-    temp_sql_path = PROJECT_ROOT / "gonzo_pit_strategy" / "db" / "temp_init.sql"
-    with open(temp_sql_path, "w") as f:
-        f.write(sql)
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sql", delete=False
+    ) as tmp:
+        tmp.write(sql)
+        temp_sql_path = Path(tmp.name)
 
     try:
         cmd = [
@@ -106,7 +109,7 @@ def initialize_database(args: argparse.Namespace) -> bool:
         env = os.environ.copy()
         env["PGPASSWORD"] = args.db_admin_password
 
-        logger.info(f"Running database initialization script...")
+        logger.info("Running database initialization script...")
         result = subprocess.run(
             cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
@@ -175,7 +178,7 @@ def run_migrations(args: argparse.Namespace) -> bool:
 
 
 def load_csv_data(file_path: Path, table_name: str, args: argparse.Namespace) -> bool:
-    """Load a single CSV file into a table using psql \copy."""
+    r"""Load a single CSV file into a table using psql \copy."""
     if not file_path.exists():
         logger.warning(f"File not found: {file_path}. Skipping.")
         return False
@@ -184,40 +187,44 @@ def load_csv_data(file_path: Path, table_name: str, args: argparse.Namespace) ->
 
     temp_sql = f"\\copy {args.db_schema}.{table_name} FROM '{file_path.absolute()}' WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '');"
 
-    temp_file = PROJECT_ROOT / "temp" / f"load_{table_name}.sql"
-    temp_file.parent.mkdir(exist_ok=True)
-    temp_file.write_text(temp_sql)
+    with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tmp:
+        tmp.write(temp_sql)
+        temp_file = Path(tmp.name)
 
-    cmd = [
-        "psql",
-        "-h",
-        args.db_host,
-        "-p",
-        str(args.db_port),
-        "-U",
-        args.app_username,
-        "-d",
-        args.db_name,
-        "-f",
-        str(temp_file),
-    ]
+    try:
+        cmd = [
+            "psql",
+            "-h",
+            args.db_host,
+            "-p",
+            str(args.db_port),
+            "-U",
+            args.app_username,
+            "-d",
+            args.db_name,
+            # Without this psql exits 0 even when the \copy raises, and every
+            # failed load is reported as a success.
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-f",
+            str(temp_file),
+        ]
 
-    env = os.environ.copy()
-    env["PGPASSWORD"] = args.app_password
+        env = os.environ.copy()
+        env["PGPASSWORD"] = args.app_password
 
-    result = subprocess.run(
-        cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
+        result = subprocess.run(
+            cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
 
-    if result.returncode == 0:
-        logger.info(f"Successfully loaded {table_name}")
-        return True
-    else:
+        if result.returncode == 0:
+            logger.info(f"Successfully loaded {table_name}")
+            return True
+
         logger.error(f"Failed to load {table_name}: {result.stderr}")
         return False
-
-    if temp_file.exists():
-        temp_file.unlink()
+    finally:
+        temp_file.unlink(missing_ok=True)
 
 
 def load_data(args: argparse.Namespace) -> bool:
@@ -306,6 +313,11 @@ def validate_args(args: argparse.Namespace) -> bool:
 
 def main():
     args = parse_args()
+
+    # Connection details come from the CLI arguments, not AppConfig — this runs
+    # before the application has a database to connect to. AppConfig is consulted
+    # only for logging, so `logger.info` below actually reaches the terminal.
+    setup_logging(AppConfig().logging)
 
     steps = args.steps.lower().split(",")
     if "all" in steps:

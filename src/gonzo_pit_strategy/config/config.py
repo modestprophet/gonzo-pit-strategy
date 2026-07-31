@@ -1,15 +1,18 @@
 """
 Unified application configuration using Pydantic Settings.
 
-This module provides the AppConfig tree, populated via Environment Variables
-and the Vault Settings Source.
+This module provides the AppConfig tree, populated via Environment Variables,
+a `.env` file, and the Vault Settings Source.
+
+Environment variables use pydantic-settings' nested delimiter `__`, so a field
+at `AppConfig.db.host` is set by `DB__HOST`. This is the single mechanism —
+nothing in this tree reads `os.environ` directly (ADR 0001 §1).
 """
 
-import os
-from typing import Any, Dict, Optional, Tuple, Type, get_origin, get_args
+from typing import Any, Dict, Optional, Tuple, Type, get_origin
 import inspect
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -24,6 +27,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class VaultConfig(BaseModel):
+    """HashiCorp Vault connection settings.
+
+    Vault is optional: when `addr`, `role_id`, or `secret_id` is unset, the
+    Vault Settings Source disables itself and every field falls through to its
+    environment value or default.
+    """
+
+    addr: Optional[str] = None
+    role_id: Optional[str] = None
+    secret_id: Optional[str] = None
+    mount_point: str = "secret/data/development"
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.addr and self.role_id and self.secret_id)
+
+
 class VaultSettingsSource(PydanticBaseSettingsSource):
     """Adapter pattern for fetching secrets from HashiCorp Vault.
 
@@ -33,22 +54,31 @@ class VaultSettingsSource(PydanticBaseSettingsSource):
     during initialization. It recurses into nested BaseModels.
     """
 
-    def __init__(self, settings_cls: Type[BaseSettings], vault_client: Optional[Any] = None):
+    def __init__(
+        self,
+        settings_cls: Type[BaseSettings],
+        vault_config: VaultConfig,
+        vault_client: Optional[Any] = None,
+    ):
         super().__init__(settings_cls)
-        
+
         if vault_client is not None:
             self.vault = vault_client
-        else:
+        elif vault_config.enabled:
             try:
-                if all([os.environ.get("VAULT_ADDR"), os.environ.get("VAULT_ROLE_ID"), os.environ.get("VAULT_SECRET_ID")]):
-                   self.vault = Multipass()
-                else:
-                   self.vault = None
+                self.vault = Multipass(
+                    url=vault_config.addr,
+                    role_id=vault_config.role_id,
+                    secret_id=vault_config.secret_id,
+                )
             except Exception as e:
-                logger.warning(f"Vault initialization skipped or failed: {e}")
+                logger.warning(f"Vault initialization failed; using defaults: {e}")
                 self.vault = None
+        else:
+            logger.debug("Vault not configured; skipping secret injection.")
+            self.vault = None
 
-        self.mount_point = os.environ.get("VAULT_MOUNT_POINT", "secret/data/development").strip("/")
+        self.mount_point = vault_config.mount_point.strip("/")
 
     def _get_vault_secrets(self, model_cls: Type[BaseModel]) -> Dict[str, Any]:
         """Recursively fetch vault secrets for a model's fields."""
@@ -105,18 +135,24 @@ class VaultSettingsSource(PydanticBaseSettingsSource):
 
 
 class DatabaseConfig(BaseModel):
-    """Database configuration segment."""
-    host: str = Field(default=os.environ.get("DB_HOST", "localhost"))
-    port: int = Field(default=int(os.environ.get("DB_PORT", "5432")))
-    name: str = Field(default=os.environ.get("DB_NAME", "gonzo"))
-    user: str = Field(default=os.environ.get("DB_USER", "gonzo_user"))
-    
-    # Path relative to VAULT_MOUNT_POINT.
+    """Database configuration segment.
+
+    Set via `DB__HOST`, `DB__PORT`, `DB__NAME`, `DB__USER`, `DB__PASSWORD`.
+    Defaults below are plain literals: reading `os.environ` here would freeze
+    values at import time and bypass the settings sources entirely.
+    """
+    host: str = "localhost"
+    port: int = 5432
+    name: str = "gonzo"
+    user: str = "gonzo_user"
+
+    # Path relative to VaultConfig.mount_point.
     password: str = Field(
-        default=os.environ.get("DB_PASSWORD", "local_dev_password"), 
-        json_schema_extra={"vault_path": "database"}
+        default="local_dev_password",
+        json_schema_extra={"vault_path": "password"},
     )
-    
+
+
     def get_db_url(self) -> Any:
         """Get SQLAlchemy URL."""
         return URL.create(
@@ -137,10 +173,36 @@ class DatabaseConfig(BaseModel):
             'pool_recycle': 1800
         }
 
+class PathsConfig(BaseModel):
+    """Filesystem locations for training outputs. Injected per ADR 0001 —
+    no component should derive these from os.getcwd().
+
+    `artifacts_root` is the sole home for trained models: an Artifact directory
+    holds the model plus its manifest (ADR 0002), so there is no separate
+    checkpoint location.
+    """
+    artifacts_root: str = "models/artifacts"
+    tensorboard_dir: str = "logs/tensorboard"
+    experiments_dir: str = "config/experiments"
+
+
 class LoggingConfig(BaseModel):
-    """Logging configuration segment."""
-    level: str = Field(default="INFO")
-    format: str = Field(default="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    """Logging configuration segment. Set via `LOGGING__LEVEL`."""
+    level: str = "INFO"
+    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+
+def setup_logging(config: LoggingConfig) -> None:
+    """Configure root logging once, at the entry point.
+
+    Every module logs through `logging.getLogger(__name__)`; without this call
+    those records have nowhere to go and are silently discarded.
+    """
+    logging.basicConfig(
+        level=config.level.upper(),
+        format=config.format,
+        force=True,
+    )
 
 
 class AppConfig(BaseSettings):
@@ -156,10 +218,12 @@ class AppConfig(BaseSettings):
     )
 
     app_env: str = Field(default="development", description="Environment: development, testing, production")
-    
+
     db: DatabaseConfig = Field(default_factory=DatabaseConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    paths: PathsConfig = Field(default_factory=PathsConfig)
     training: TrainingConfig = Field(default_factory=TrainingConfig)
+    vault: VaultConfig = Field(default_factory=VaultConfig)
 
     @classmethod
     def settings_customise_sources(
@@ -171,18 +235,40 @@ class AppConfig(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> Tuple[PydanticBaseSettingsSource, ...]:
         """Inject Vault as a settings source.
-        
+
         Priority:
         1. Explicitly passed kwargs (init_settings)
-        2. Environment variables (env_settings / dotenv_settings)
+        2. Environment variables (env_settings), then `.env` (dotenv_settings)
         3. Vault secrets (VaultSettingsSource)
+
+        Vault's own connection settings must be resolved before the Vault
+        source can be built, so the earlier sources are consulted here to
+        assemble `AppConfig.vault` (ADR 0001 §1 — no `os.environ` reads).
         """
         vault_client = init_settings.init_kwargs.get('_vault_client')
-        
+
+        merged: Dict[str, Any] = {}
+        for source in (dotenv_settings, env_settings, init_settings):
+            try:
+                merged.update(source() or {})
+            except Exception as e:  # a malformed source must not block startup
+                logger.warning(f"Settings source {source.__class__.__name__} failed: {e}")
+
+        raw_vault = merged.get("vault") or {}
+        if isinstance(raw_vault, str):
+            raw_vault = {}
+        try:
+            vault_config = VaultConfig(**raw_vault)
+        except Exception as e:
+            logger.warning(f"Invalid vault configuration, Vault disabled: {e}")
+            vault_config = VaultConfig()
+
         return (
             init_settings,
             env_settings,
             dotenv_settings,
-            VaultSettingsSource(settings_cls, vault_client=vault_client),
+            VaultSettingsSource(
+                settings_cls, vault_config=vault_config, vault_client=vault_client
+            ),
             file_secret_settings,
         )

@@ -5,9 +5,11 @@ It handles authentication, secret retrieval, and credential management for vario
 services including databases, cloud providers, and APIs.
 """
 
-from .vault import Multipass
+from .vault import Multipass, VaultError, VaultAuthenticationError, VaultSecretError
 
 __all__ = [
     'Multipass',
+    'VaultError',
+    'VaultAuthenticationError',
     'VaultSecretError',
 ]
