@@ -8,16 +8,17 @@ from keras import callbacks
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
+import keras
+
 from gonzo_pit_strategy.training.config import TrainingConfig
 from gonzo_pit_strategy.training.data import load_training_data, TrainingDataSource
 from gonzo_pit_strategy.training.model_factory import build_model
 from gonzo_pit_strategy.training.callbacks import (
-    GonzoExperimentCallback,
     ConsoleMetricsCallback,
+    EpochMetricsCallback,
 )
-from gonzo_pit_strategy.training.artifact import ArtifactStore
-from gonzo_pit_strategy.db.repositories.model_repository import ModelRepository
-from gonzo_pit_strategy.db.connection_pool import ConnectionPool
+from gonzo_pit_strategy.training.artifact import ArtifactManifest, ArtifactStore
+from gonzo_pit_strategy.training.ledger import RunLedger
 from gonzo_pit_strategy.config.config import PathsConfig
 import logging
 
@@ -32,31 +33,48 @@ class ExperimentResult:
     test_loss: float
     test_metrics: Dict[str, float]
     history: Dict[str, Any]
+    artifact_path: str
 
 
 class Experiment:
     """
     Encapsulates the full lifecycle of a single model training process.
     Provides a deep module interface to run training from a configuration.
+
+    Its two collaborators — the ArtifactStore and the Run Ledger — are injected
+    rather than constructed here, so a test drives a real Experiment against a
+    temp directory and an in-memory ledger with no patching.
     """
 
     def __init__(
         self,
         config: TrainingConfig,
         data_source: TrainingDataSource,
-        db_pool: ConnectionPool,
+        artifact_store: ArtifactStore,
+        ledger: RunLedger,
         config_path: Optional[str] = None,
         paths: Optional[PathsConfig] = None,
+        environment: str = "local",
     ):
         self.config = config
         self.data_source = data_source
-        self.db_pool = db_pool
+        self.artifact_store = artifact_store
+        self.ledger = ledger
         self.config_path = config_path
         self.paths = paths or PathsConfig()
+        self.environment = environment
 
     def run(self) -> ExperimentResult:
         """
         Execute a full training experiment based on the configuration.
+
+        The order below is the contract, and it is why this is straight-line
+        code rather than a set of callbacks: train, *then* evaluate, *then*
+        write the Artifact from the model those metrics were measured on,
+        *then* mirror it to the database. Expressed as `on_train_end`
+        callbacks this ordering depended on list position against
+        EarlyStopping's weight restore, and silently produced an Artifact that
+        the reported metrics did not describe (ADR 0002).
 
         Returns:
             ExperimentResult object.
@@ -77,84 +95,102 @@ class Experiment:
         model = build_model(self.config, input_shape, output_shape)
         model.summary()
 
-        # 3. Setup Callbacks & Logging
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         model_version = f"{self.config.model.type}_{timestamp}"
 
-        # Injected paths (ADR 0001) — no os.getcwd() derivation
-        tensorboard_log_dir = self.paths.tensorboard_dir
+        with self.ledger.run(self.config, environment=self.environment) as run:
+            # 3. Setup Callbacks — per-epoch concerns only.
+            cb_list = []
 
-        artifact_store = ArtifactStore(self.paths.artifacts_root)
-        repo = ModelRepository()
+            if self.config.early_stopping_patience > 0:
+                cb_list.append(
+                    callbacks.EarlyStopping(
+                        monitor="val_loss",
+                        patience=self.config.early_stopping_patience,
+                        restore_best_weights=True,
+                        verbose=1,
+                    )
+                )
 
-        # Main Experiment Callback (Handles Artifact save + DB mirror)
-        experiment_cb = GonzoExperimentCallback(
-            self.config, repo, artifact_store, data, model_version,
-            db_pool=self.db_pool, config_path=self.config_path,
-        )
+            cb_list.append(ConsoleMetricsCallback())
 
-        # Keras invokes `on_train_end` in list order, so EarlyStopping must come
-        # before experiment_cb: it restores the best weights, and experiment_cb
-        # then saves those weights as the Artifact. Reversed, the Artifact would
-        # hold the *final* epoch's weights while the test metrics — measured
-        # after the restore — described a different model.
-        cb_list = []
-
-        if self.config.early_stopping_patience > 0:
+            # Injected paths (ADR 0001) — no os.getcwd() derivation
+            log_dir = os.path.join(self.paths.tensorboard_dir, model_version)
+            os.makedirs(log_dir, exist_ok=True)
             cb_list.append(
-                callbacks.EarlyStopping(
-                    monitor="val_loss",
-                    patience=self.config.early_stopping_patience,
-                    restore_best_weights=True,
-                    verbose=1,
+                callbacks.TensorBoard(
+                    log_dir=log_dir, histogram_freq=1, write_graph=True, update_freq="epoch"
                 )
             )
 
-        # Console Logger
-        cb_list.append(ConsoleMetricsCallback())
+            cb_list.append(EpochMetricsCallback(run))
 
-        # TensorBoard
-        log_dir = os.path.join(tensorboard_log_dir, model_version)
-        os.makedirs(log_dir, exist_ok=True)
-        cb_list.append(
-            callbacks.TensorBoard(
-                log_dir=log_dir, histogram_freq=1, write_graph=True, update_freq="epoch"
+            # 4. Train
+            logger.info(f"Starting training for {self.config.epochs} epochs...")
+            history = model.fit(
+                X_train,
+                y_train,
+                validation_data=(X_val, y_val),
+                epochs=self.config.epochs,
+                batch_size=self.config.batch_size,
+                callbacks=cb_list,
+                verbose=1,
             )
-        )
 
-        # Artifact save + DB mirror last: by now EarlyStopping has restored the
-        # best weights, so the Artifact *is* the best checkpoint and no separate
-        # ModelCheckpoint file is needed (ADR 0002 §2 — one writer of model files).
-        cb_list.append(experiment_cb)
+            # 5. Evaluate. EarlyStopping has restored the best weights by now
+            # (it acts in on_train_end, which model.fit has already run), so
+            # these metrics describe the model currently in memory.
+            logger.info("Evaluating on test set...")
+            # return_dict gives the real metric names. Zipping positionally
+            # against `model.metrics_names` labels them 'compile_metrics'
+            # under Keras 3, which was tolerable as a log line but not as the
+            # manifest's permanent record of what was measured.
+            evaluation = model.evaluate(X_test, y_test, verbose=1, return_dict=True)
+            test_loss = float(evaluation["loss"])
+            test_metrics = {
+                name: float(value)
+                for name, value in evaluation.items()
+                if name != "loss"
+            }
 
-        # 4. Train
-        logger.info(f"Starting training for {self.config.epochs} epochs...")
-        history = model.fit(
-            X_train,
-            y_train,
-            validation_data=(X_val, y_val),
-            epochs=self.config.epochs,
-            batch_size=self.config.batch_size,
-            callbacks=cb_list,
-            verbose=1,
-        )
+            logger.info(f"Test Loss: {test_loss}")
+            logger.info(f"Test Metrics: {test_metrics}")
 
-        # 5. Evaluate
-        logger.info("Evaluating on test set...")
-        test_loss, *test_metric_values = model.evaluate(X_test, y_test, verbose=1)
+            # 6. Save the Artifact — the very model just evaluated.
+            epochs_completed = len(next(iter(history.history.values()), []))
+            manifest = ArtifactManifest(
+                model_name="f1_pit_strategy_model",
+                model_version=model_version,
+                architecture=self.config.model.type,
+                feature_names=data.feature_names,
+                target_column=self.config.target_column,
+                training_config=self.config.model_dump(mode="json"),
+                framework_version=keras.__version__,
+                dataset_name=data.provenance.name,
+                dataset_fingerprint=data.provenance.fingerprint,
+                epochs_completed=epochs_completed,
+                test_metrics={"loss": float(test_loss), **test_metrics},
+                created_by="Experiment",
+                description=self.config.description or f"{self.config.model.type} model",
+                tags=self.config.tags,
+            )
+            artifact_dir = self.artifact_store.save(model, manifest)
 
-        test_metrics = {
-            name: val for name, val in zip(model.metrics_names[1:], test_metric_values)
-        }
+            # 7. Mirror to the database and close the run.
+            run.complete(
+                manifest,
+                artifact_dir,
+                data.provenance,
+                epochs_completed=epochs_completed,
+                config_source_path=self.config_path,
+            )
 
-        logger.info(f"Test Loss: {test_loss}")
-        logger.info(f"Test Metrics: {test_metrics}")
-
-        return ExperimentResult(
-            model_version=model_version,
-            model_id=experiment_cb.model_id,
-            run_id=experiment_cb.run_id,
-            test_loss=test_loss,
-            test_metrics=test_metrics,
-            history=history.history,
-        )
+            return ExperimentResult(
+                model_version=model_version,
+                model_id=run.model_id,
+                run_id=run.run_id,
+                test_loss=test_loss,
+                test_metrics=test_metrics,
+                history=history.history,
+                artifact_path=str(artifact_dir),
+            )

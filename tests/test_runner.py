@@ -1,134 +1,182 @@
-"""The Artifact must be the model the reported metrics describe.
+"""The Artifact must be the model the reported metrics describe (ADR 0002).
 
-`EarlyStopping(restore_best_weights=True)` and `GonzoExperimentCallback` both act
-in `on_train_end`, and Keras invokes callbacks in list order. If the artifact is
-saved first it captures the *final* epoch's weights, while the test metrics —
-measured after the restore — describe the best epoch instead. Nothing downstream
-notices: the artifact loads fine and the numbers look plausible.
+This used to be asserted indirectly, on the *order* of the Keras callback list:
+`EarlyStopping(restore_best_weights=True)` and the artifact-saving callback both
+acted in `on_train_end`, so saving first captured the final epoch's weights while
+the metrics — measured after the restore — described the best epoch instead. The
+ordering assertion was a proxy, because the direct test available at the time
+(train, then compare losses) only detects the bug when the best epoch differs
+from the last one and passes vacuously otherwise.
 
-This is asserted on the callback *order* rather than on training dynamics. A test
-that trains and compares losses only detects the bug when the best epoch differs
-from the last one, which depends on the fixture's noise and silently passes when
-val_loss happens to improve monotonically.
+`Experiment.run` now evaluates, saves, and records as straight-line code, so the
+invariant can be asserted directly and unconditionally: reload the Artifact from
+disk and require that it reproduces the evaluated model *exactly*. That holds
+whether or not EarlyStopping restored anything, so it cannot pass vacuously.
 """
 
-import contextlib
-
+import numpy as np
 import pytest
 
-from tests.conftest import StubDataSource
+from conftest import StubDataSource
+from fakes import InMemoryRunLedger
 
 
-class _FakeQuery:
-    def __init__(self, obj):
-        self._obj = obj
+def _experiment(config, raw_dataset, tmp_path, ledger):
+    from gonzo_pit_strategy.config.config import PathsConfig
+    from gonzo_pit_strategy.training.artifact import ArtifactStore
+    from gonzo_pit_strategy.training.runner import Experiment
 
-    def filter_by(self, **_kw):
-        return self
-
-    def distinct(self):
-        return self
-
-    def first(self):
-        return None
-
-    def one(self):
-        return self._obj
-
-    def count(self):
-        return 0
-
-
-class _FakeSession:
-    """Just enough of a SQLAlchemy session for the reporting-mirror writes."""
-
-    def __init__(self):
-        self.added = []
-
-    def add(self, obj):
-        self.added.append(obj)
-
-    def add_all(self, objs):
-        self.added.extend(objs)
-
-    def flush(self):
-        for obj in self.added:
-            for pk in ("run_id", "dataset_version_id"):
-                if hasattr(obj, pk) and getattr(obj, pk) is None:
-                    setattr(obj, pk, 1)
-
-    def query(self, _entity):
-        return _FakeQuery(self.added[0] if self.added else None)
+    return Experiment(
+        config,
+        StubDataSource(raw_dataset),
+        ArtifactStore(tmp_path / "artifacts"),
+        ledger,
+        paths=PathsConfig(
+            artifacts_root=str(tmp_path / "artifacts"),
+            tensorboard_dir=str(tmp_path / "tb"),
+        ),
+    )
 
 
 @pytest.fixture
-def stub_db(monkeypatch):
-    """Neutralize the DB reporting mirror; this test is about callback wiring."""
-    session = _FakeSession()
-
-    @contextlib.contextmanager
-    def _noop_session(_pool):
-        yield session
-
-    monkeypatch.setattr("gonzo_pit_strategy.training.callbacks.db_session", _noop_session)
-
-    class _Repo:
-        def record_model(self, *_a, **_kw):
-            return 1
-
-    monkeypatch.setattr(
-        "gonzo_pit_strategy.training.runner.ModelRepository", lambda *a, **k: _Repo()
-    )
-
-
-def test_early_stopping_restores_before_artifact_is_saved(
-    stub_db, raw_dataset, tmp_path, monkeypatch
-):
+def config():
     pytest.importorskip("keras")
-    from keras.callbacks import EarlyStopping
-
-    from gonzo_pit_strategy.config.config import PathsConfig
-    from gonzo_pit_strategy.training import runner as runner_mod
-    from gonzo_pit_strategy.training.callbacks import GonzoExperimentCallback
     from gonzo_pit_strategy.training.config import TrainingConfig
 
-    captured = {}
-    real_build_model = runner_mod.build_model
-
-    def spying_build_model(*args, **kwargs):
-        model = real_build_model(*args, **kwargs)
-        real_fit = model.fit
-
-        def fit(*a, **kw):
-            captured["callbacks"] = list(kw.get("callbacks") or [])
-            return real_fit(*a, **kw)
-
-        model.fit = fit
-        return model
-
-    monkeypatch.setattr(runner_mod, "build_model", spying_build_model)
-
-    paths = PathsConfig(
-        artifacts_root=str(tmp_path / "artifacts"),
-        tensorboard_dir=str(tmp_path / "tb"),
-    )
-    config = TrainingConfig(
+    return TrainingConfig(
         target_column="finish_position",
         exclude_columns=["race_id"],
-        epochs=1,
+        epochs=2,
         batch_size=8,
         early_stopping_patience=1,
     )
 
-    runner_mod.Experiment(
-        config, StubDataSource(raw_dataset), db_pool=None, paths=paths
-    ).run()
 
-    types = [type(cb) for cb in captured["callbacks"]]
-    assert EarlyStopping in types, "EarlyStopping was not wired in"
-    assert GonzoExperimentCallback in types, "GonzoExperimentCallback was not wired in"
-    assert types.index(EarlyStopping) < types.index(GonzoExperimentCallback), (
-        "GonzoExperimentCallback saves the Artifact in on_train_end and must run "
-        "after EarlyStopping restores the best weights; Keras calls callbacks in "
-        f"list order and this order is {[t.__name__ for t in types]}"
+def test_saved_artifact_is_the_evaluated_model(config, raw_dataset, tmp_path, ledger):
+    from gonzo_pit_strategy.training.artifact import ArtifactStore
+    from gonzo_pit_strategy.training.data import load_training_data
+
+    result = _experiment(config, raw_dataset, tmp_path, ledger).run()
+
+    reloaded, manifest = ArtifactStore(tmp_path / "artifacts").load(
+        result.model_version
     )
+
+    # Re-derive the same test split (same config, same seed) and require the
+    # artifact on disk to score exactly what the run reported.
+    data = load_training_data(config, StubDataSource(raw_dataset))
+    reloaded_loss = reloaded.evaluate(data.X_test, data.y_test, verbose=0)[0]
+
+    np.testing.assert_allclose(reloaded_loss, result.test_loss, rtol=1e-5)
+    np.testing.assert_allclose(
+        manifest.test_metrics["loss"], result.test_loss, rtol=1e-5
+    )
+
+
+def test_manifest_carries_provenance_and_metrics(config, raw_dataset, tmp_path, ledger):
+    result = _experiment(config, raw_dataset, tmp_path, ledger).run()
+    manifest = ledger.last.manifest
+
+    assert manifest.dataset_name == "fixture_dataset"
+    assert manifest.dataset_fingerprint
+    assert manifest.test_metrics["loss"] == pytest.approx(result.test_loss)
+    # Real metric names, not Keras 3's positional 'compile_metrics' label.
+    assert "mae" in manifest.test_metrics
+    assert manifest.epochs_completed == ledger.last.epochs_completed
+    assert manifest.feature_names == [
+        c for c in raw_dataset.columns if c not in ("finish_position", "race_id")
+    ]
+
+
+def test_completed_run_is_recorded_once_with_the_artifact_path(
+    config, raw_dataset, tmp_path, ledger
+):
+    result = _experiment(config, raw_dataset, tmp_path, ledger).run()
+
+    assert len(ledger.runs) == 1, "ADR 0002 §3: one record, written at train end"
+    record = ledger.last
+    assert record.status == "COMPLETED"
+    assert record.artifact_path == result.artifact_path
+    assert record.provenance.name == "fixture_dataset"
+    assert record.provenance.record_count == len(raw_dataset)
+    per_epoch = {m.epoch for m in record.metrics if m.split != "TEST"}
+    assert per_epoch == set(
+        range(record.epochs_completed)
+    ), "epoch metrics stream as training proceeds"
+
+
+def test_build_failure_records_nothing(
+    config, raw_dataset, tmp_path, ledger, monkeypatch
+):
+    """Failing before the ledger block opens leaves no row at all."""
+    from gonzo_pit_strategy.training import runner as runner_mod
+
+    def exploding_build_model(*_a, **_kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(runner_mod, "build_model", exploding_build_model)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        _experiment(config, raw_dataset, tmp_path, ledger).run()
+
+    assert ledger.runs == []
+
+
+def test_run_is_closed_as_failed_when_fit_raises(
+    config, raw_dataset, tmp_path, ledger, monkeypatch
+):
+    """A run that dies mid-training must not be left at RUNNING.
+
+    The previous design opened the run in `on_train_begin` and closed it in
+    `on_train_end`, so anything raising in between left the row RUNNING forever
+    — and `Sweep.run` catches per-experiment exceptions and continues, so a
+    failing sweep silently accumulated them.
+    """
+    from gonzo_pit_strategy.training import runner as runner_mod
+
+    real_build_model = runner_mod.build_model
+
+    def build_model_that_fails_to_fit(*a, **kw):
+        model = real_build_model(*a, **kw)
+
+        def fit(*_a, **_kw):
+            raise RuntimeError("boom")
+
+        model.fit = fit
+        return model
+
+    monkeypatch.setattr(runner_mod, "build_model", build_model_that_fails_to_fit)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        _experiment(config, raw_dataset, tmp_path, ledger).run()
+
+    assert len(ledger.runs) == 1
+    assert ledger.last.status == "FAILED"
+    assert ledger.last.manifest is None, "no model row for a run that never finished"
+
+
+def test_sweep_records_one_run_per_experiment(config, raw_dataset, tmp_path):
+    from gonzo_pit_strategy.config.config import PathsConfig
+    from gonzo_pit_strategy.training.artifact import ArtifactStore
+    from gonzo_pit_strategy.training.sweep import Sweep, SweepConfig
+
+    ledger = InMemoryRunLedger()
+    sweep = Sweep(
+        SweepConfig(
+            base_config=config,
+            parameters={"model.hidden_layers": [[4], [8]]},
+        ),
+        StubDataSource(raw_dataset),
+        ArtifactStore(tmp_path / "artifacts"),
+        ledger,
+        paths=PathsConfig(
+            artifacts_root=str(tmp_path / "artifacts"),
+            tensorboard_dir=str(tmp_path / "tb"),
+        ),
+    )
+
+    results = list(sweep.run())
+
+    assert [it.error for it in results] == [None, None]
+    assert len(ledger.runs) == 2
+    assert {r.status for r in ledger.runs} == {"COMPLETED"}

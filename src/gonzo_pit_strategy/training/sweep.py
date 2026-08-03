@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 from gonzo_pit_strategy.training.config import TrainingConfig
 from gonzo_pit_strategy.training.runner import Experiment, ExperimentResult
 from gonzo_pit_strategy.training.data import TrainingDataSource
-from gonzo_pit_strategy.db.connection_pool import ConnectionPool
+from gonzo_pit_strategy.training.artifact import ArtifactStore
+from gonzo_pit_strategy.training.ledger import RunLedger
 from gonzo_pit_strategy.config.config import PathsConfig
 
 logger = logging.getLogger(__name__)
@@ -58,13 +59,15 @@ class Sweep:
         self,
         config: SweepConfig,
         data_source: TrainingDataSource,
-        db_pool: ConnectionPool,
+        artifact_store: ArtifactStore,
+        ledger: RunLedger,
         config_path: Optional[str] = None,
         paths: Optional[PathsConfig] = None,
     ):
         self.config = config
         self.data_source = data_source
-        self.db_pool = db_pool
+        self.artifact_store = artifact_store
+        self.ledger = ledger
         self.config_path = config_path
         self.paths = paths
 
@@ -115,7 +118,8 @@ class Sweep:
                 experiment = Experiment(
                     config=exp_config,
                     data_source=self.data_source,
-                    db_pool=self.db_pool,
+                    artifact_store=self.artifact_store,
+                    ledger=self.ledger,
                     config_path=self.config_path,
                     paths=self.paths,
                 )

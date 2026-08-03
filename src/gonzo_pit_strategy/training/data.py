@@ -37,11 +37,18 @@ engineering, NaN filling, or dataset splitting occurs."""
 
 
 class TrainingDataSource(Protocol):
-    """Interface boundary that provides a RawDataset to the training pipeline.
+    """The seam at which a RawDataset enters the training pipeline.
 
-    Any object with a ``fetch_raw_data`` method returning a ``pd.DataFrame``
+    Any object with a ``fetch_raw_data`` method and a ``dataset_name`` property
     satisfies this Protocol – no inheritance required.
+
+    ``dataset_name`` names *what* the data is; the Dataset Fingerprint says
+    which revision of it. The source is what knows both, so it names itself
+    rather than leaving the recorder to guess.
     """
+
+    @property
+    def dataset_name(self) -> str: ...
 
     def fetch_raw_data(self) -> RawDataset: ...
 
@@ -55,15 +62,32 @@ class DatabaseDataSource:
     """Adapter that fetches a RawDataset from a PostgreSQL database.
 
     The caller (typically the CLI entry point) is responsible for providing
-    a SQLAlchemy Engine, keeping the connection lifecycle contained
-    within the application boundaries.
+    a SQLAlchemy Engine, so the connection lifecycle stays owned by the entry
+    point rather than by this adapter (ADR 0001 §4).
     """
 
     _DEFAULT_QUERY = "SELECT * FROM f1db_ml_prep.prep_training_dataset"
+    _DEFAULT_NAME = "prep_training_dataset"
 
-    def __init__(self, engine, *, query: str | None = None) -> None:
+    def __init__(
+        self, engine, *, query: str | None = None, dataset_name: str | None = None
+    ) -> None:
         self._engine = engine
         self._query = query or self._DEFAULT_QUERY
+        if dataset_name:
+            self._dataset_name = dataset_name
+        elif query:
+            # A caller-supplied query is a different dataset even when it hits
+            # the same table, so it must not silently inherit the default name:
+            # dataset_versions is unique on (dataset_name, version), and two
+            # genuinely different datasets filed under one name collide there.
+            self._dataset_name = f"custom:{hashlib.sha256(query.encode()).hexdigest()[:12]}"
+        else:
+            self._dataset_name = self._DEFAULT_NAME
+
+    @property
+    def dataset_name(self) -> str:
+        return self._dataset_name
 
     def fetch_raw_data(self) -> RawDataset:
         logger.info(f"Fetching RawDataset via: {self._query}")
@@ -133,6 +157,20 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@dataclass(frozen=True)
+class DatasetProvenance:
+    """Identity of the data an Experiment trained on.
+
+    Travels as one value from the TrainingDataSource into both the Artifact
+    Manifest and the Run Ledger, so the two cannot describe different data.
+    """
+
+    name: str
+    fingerprint: str
+    record_count: int
+    feature_count: int
+
+
 @dataclass
 class LoadedData:
     """ML-ready splits plus the provenance needed for the Artifact Manifest
@@ -145,9 +183,7 @@ class LoadedData:
     y_val: np.ndarray
     y_test: np.ndarray
     feature_names: List[str]
-    dataset_fingerprint: str
-    record_count: int
-    feature_count: int
+    provenance: DatasetProvenance
 
 
 def load_training_data(
@@ -223,7 +259,10 @@ def load_training_data(
         y_val=y_val,
         y_test=y_test,
         feature_names=feature_names,
-        dataset_fingerprint=dataset_fingerprint,
-        record_count=record_count,
-        feature_count=len(feature_names),
+        provenance=DatasetProvenance(
+            name=data_source.dataset_name,
+            fingerprint=dataset_fingerprint,
+            record_count=record_count,
+            feature_count=len(feature_names),
+        ),
     )

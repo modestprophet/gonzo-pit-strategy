@@ -20,7 +20,10 @@ Design decisions live in `docs/adr/`; the project's vocabulary is defined in
 ## Prerequisites
 
 - **Python 3.11+** (`.python-version` pins 3.13)
-- **PostgreSQL 13+**, running and reachable
+- **PostgreSQL 17** — dev and prod both run 17.10 on Debian/glibc. The Dataset
+  Fingerprint is collation-dependent, so major version *and* libc must match
+  between any two databases you intend to compare; see Gate −1 in
+  [`docs/E2E_FROM_PROD_SNAPSHOT.md`](docs/E2E_FROM_PROD_SNAPSHOT.md)
 - **[uv](https://github.com/astral-sh/uv)** for dependency management
 - **[goose](https://github.com/pressly/goose)** for migrations —
   `go install github.com/pressly/goose/v3/cmd/goose@latest`
@@ -116,8 +119,8 @@ tool isn't on `PATH`.
 
 ### Testing against a scratch database
 
-The whole pipeline runs against any empty Postgres 16 — useful for verifying
-migrations without touching a real database:
+The whole pipeline runs against any empty Postgres matching the version and
+libc above — useful for verifying migrations without touching a real database:
 
 ```bash
 uv run gonzo-load --db-host <scratch-host> --db-name f1db \
@@ -146,15 +149,20 @@ dbt build
 ```
 
 dbt materializes into `f1db_staging`, `f1db_intermediate`, `f1db_features` and
-`f1db_ml_prep`, creating those schemas on first run — which is why `init_db.sql`
+`f1db_ml_prep`, creating those schemas on first run — the first three as views,
+so every intermediate layer stays directly queryable for inspection — which is why `init_db.sql`
 grants the app role `CREATE ON DATABASE`, not just rights on the `f1db` schema.
 `permission denied for database f1db` means that grant is missing.
 
 Lineage runs staging → intermediate → features → ml_prep, ending at
-`f1db_ml_prep.prep_training_dataset`. **dbt owns all feature engineering**: DNF
-handling, time conversion, lagging, season progress, one-hot encoding, and
-scaling are SQL models (`dbt/models/features/`, `dbt/models/ml_prep/`), not
-Python. Add or change features there.
+`f1db_ml_prep.prep_training_dataset`. **dbt owns dataset-level feature
+engineering**: DNF handling, time conversion, lagging, season progress, one-hot
+encoding, and scaling are SQL models (`dbt/models/features/`,
+`dbt/models/ml_prep/`), not Python. Add or change features there.
+
+The dividing line is not SQL-vs-Python but *does inference have to reproduce
+this?* — transformations the predictor must repeat live in `prepare_features`;
+transformations that define the dataset live here. See ADR 0003.
 
 ## 5. Train
 
@@ -167,10 +175,12 @@ uv run gonzo-train --config config/experiments/training_config_default.json
 ```
 
 What happens: the dataset is fetched and content-fingerprinted, split
-train/val/test, the model is built from config, and on train end the Artifact is
-written to `models/artifacts/<version>/` while `model_metadata`,
-`dataset_versions`, and `training_runs` are updated once as a reporting mirror
-(ADR 0002). Per-epoch metrics stream to `training_metrics` and TensorBoard.
+train/val/test, and the model is built from config and trained. Then, as
+sequential steps in `Experiment.run` — not as callbacks — the model is
+evaluated, the Artifact is written to `models/artifacts/<version>/`, and
+`model_metadata`, `dataset_versions`, and `training_runs` are updated once
+through the Run Ledger as a reporting mirror (ADR 0002). Per-epoch metrics
+stream to `training_metrics` and TensorBoard.
 
 Configs are validated by pydantic, so a typo or an out-of-range value fails
 before training starts:
@@ -257,24 +267,10 @@ Tests need neither a database nor a GPU. `tests/conftest.py` provides a
 `StubDataSource` satisfying the `TrainingDataSource` protocol, and the keras
 import is lazy so the config and data tests run without TensorFlow.
 
-## Reusing this as a template
+## Design decisions
 
-The generic ML spine is:
-
-- `config/` — `AppConfig`, Vault settings source, `setup_logging`
-- `db/base.py`, `db/connection_pool.py`, and the four metadata tables
-  (`training_runs`, `training_metrics`, `model_metadata`, `dataset_versions`)
-- `training/` — `config`, `data`, `runner`, `model_factory`, `callbacks`,
-  `artifact`, `sweep`
-- `inference/predictor.py`, `cli/train.py`
-
-The F1-specific parts are exactly:
-
-- `dbt/` — the whole transformation layer
-- the `prep_training_dataset` query in `DatabaseDataSource` (`training/data.py`)
-- the F1 defaults in `training/config.py` (`target_column`, `tags`)
-- `utils/db_setup.py` and `db/migrations/002_jolpica_setup.sql` — Jolpica ingest
-
-These are deliberately **not** parameterized. Extracting a cookiecutter means
-copying the spine and editing those four places, which is cheaper to reason
-about than the indirection that generalizing them would require.
+| ADR | Decision |
+|---|---|
+| [0001](docs/adr/0001-declarative-configuration-and-secrets.md) | Declarative configuration and secrets injection — one `AppConfig` tree, no global singletons |
+| [0002](docs/adr/0002-self-describing-artifacts.md) | Self-describing artifacts; the database is a reporting mirror owned by the Run Ledger |
+| [0003](docs/adr/0003-feature-engineering-belongs-to-dbt.md) | Feature engineering belongs to dbt; the seam is inference, not language |

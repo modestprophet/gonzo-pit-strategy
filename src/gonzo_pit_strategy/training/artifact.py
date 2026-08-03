@@ -36,7 +36,17 @@ class ArtifactManifest(BaseModel):
     target_column: str
     training_config: Dict[str, Any] = Field(default_factory=dict)
     framework_version: str
+    dataset_name: Optional[str] = None
     dataset_fingerprint: Optional[str] = None
+    epochs_completed: Optional[int] = None
+    test_metrics: Dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Held-out metrics measured on this exact model, keyed by metric name "
+            "(includes 'loss'). Written after evaluation and before the model file, "
+            "so the Artifact carries the numbers that describe it (ADR 0002)."
+        ),
+    )
     created_at: datetime = Field(default_factory=datetime.now)
     created_by: str = "Experiment"
     description: Optional[str] = None

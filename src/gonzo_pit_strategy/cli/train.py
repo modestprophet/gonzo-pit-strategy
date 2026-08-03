@@ -11,9 +11,11 @@ from gonzo_pit_strategy.training.config import TrainingConfig
 from gonzo_pit_strategy.training.runner import Experiment
 from gonzo_pit_strategy.training.sweep import SweepConfig, Sweep
 from gonzo_pit_strategy.training.data import DatabaseDataSource
+from gonzo_pit_strategy.training.artifact import ArtifactStore
 import logging
 from gonzo_pit_strategy.config.config import AppConfig, setup_logging
 from gonzo_pit_strategy.db.connection_pool import ConnectionPool
+from gonzo_pit_strategy.db.run_ledger import PostgresRunLedger
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +52,12 @@ def main():
         logger.info(f"Default config written to {output_path}")
         return
 
+    # The entry point owns the wiring (ADR 0001 §4): it builds the adapters and
+    # injects them, so nothing downstream constructs its own collaborators.
     pool = ConnectionPool(app_config.db)
     data_source = DatabaseDataSource(pool.engine)
+    artifact_store = ArtifactStore(app_config.paths.artifacts_root)
+    ledger = PostgresRunLedger(pool)
 
     config_dict = {}
 
@@ -79,7 +85,14 @@ def main():
             logger.error(f"Invalid base configuration for sweep: {e}")
             sys.exit(1)
 
-        sweep = Sweep(sweep_config, data_source, pool, config_path=args.grid_search, paths=app_config.paths)
+        sweep = Sweep(
+            sweep_config,
+            data_source,
+            artifact_store,
+            ledger,
+            config_path=args.grid_search,
+            paths=app_config.paths,
+        )
 
         results = []
         for iteration in sweep.run():
@@ -112,7 +125,14 @@ def main():
     config_source_path = args.config if args.config else None
 
     try:
-        experiment = Experiment(training_config, data_source, pool, config_path=config_source_path, paths=app_config.paths)
+        experiment = Experiment(
+            training_config,
+            data_source,
+            artifact_store,
+            ledger,
+            config_path=config_source_path,
+            paths=app_config.paths,
+        )
         result = experiment.run()
         logger.info("Experiment completed successfully.")
         logger.info(f"Run ID: {result.run_id}")

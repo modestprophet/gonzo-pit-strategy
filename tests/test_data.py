@@ -31,9 +31,10 @@ def test_load_training_data_from_stub(raw_dataset):
     assert data.feature_names == [
         c for c in raw_dataset.columns if c not in ("finish_position", "race_id")
     ]
-    assert data.feature_count == len(data.feature_names)
-    assert data.record_count == len(raw_dataset)
-    assert data.dataset_fingerprint
+    assert data.provenance.name == "fixture_dataset"
+    assert data.provenance.feature_count == len(data.feature_names)
+    assert data.provenance.record_count == len(raw_dataset)
+    assert data.provenance.fingerprint
     total = len(data.X_train) + len(data.X_val) + len(data.X_test)
     assert total == len(raw_dataset)
-    assert data.X_train.shape[1] == data.feature_count
+    assert data.X_train.shape[1] == data.provenance.feature_count
