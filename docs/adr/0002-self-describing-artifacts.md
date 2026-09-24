@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted 2026-07-29. Revised three times through 2026-07-31 as implementation
-exposed holes in the original decisions; see *History*. The decisions below are
-current.
+Accepted 2026-07-29. Lifecycle revisions landed through 2026-07-31.
+Publication guarantees added 2026-09-24. See *History* for the reasons behind
+these decisions.
 
 ## Context
 
@@ -32,6 +32,25 @@ duplicated across `callbacks.py` and `model_repository.py`.
    joins artifact paths or touches artifact files. `artifacts_root` is the sole
    output location — there is no separate checkpoint directory and no second
    writer of model files.
+
+   `ArtifactStore.save` publishes the model and Artifact Manifest together.
+   It rejects every occupied version with `FileExistsError`, including empty
+   directories, symlinks, and repeated identical saves. Serialization happens
+   in a private `.gonzo-stage-*` directory beneath the Artifact root. Linux
+   `renameat2` with `RENAME_NOREPLACE` publishes that directory in one operation.
+   Unsupported publication fails rather than falling back to an ordinary rename.
+
+   These guarantees cover concurrent writers and readers, ordinary exceptions,
+   and abrupt process termination on local Linux filesystems. Power-loss
+   durability and concurrent deletion are outside the contract. Catchable
+   failures clean up staging. A killed process can leave hidden staging, which
+   loaders reject even through symlink aliases. Automatic stale-staging cleanup
+   is intentionally absent because it could remove an active writer's files.
+
+   Versions are single directory names, and `.gonzo-stage-` is reserved for
+   unpublished work. New Experiments use the model type followed by a full UUIDv4
+   in hexadecimal form. Existing timestamp-named Artifacts keep their layout and
+   remain loadable without native publication support or a database connection.
 
 3. **The database is a reporting mirror, and the Run Ledger owns it.** One
    module owns everything the database records about a Training Run: the run
@@ -126,8 +145,39 @@ duplicated across `callbacks.py` and `model_repository.py`.
 
 ## History
 
-Three corrections landed after acceptance. Each is kept because the failure it
-fixed is the reason the decision is shaped the way it is.
+The corrections below explain how failures shaped the current decisions.
+
+### Publication protects earlier Artifacts, 2026-09-24
+
+The sequential Experiment lifecycle made each save describe its evaluated model,
+but did not protect that Artifact from a later save. Second-resolution versions
+could collide, and saving reused the final directory. A later Experiment could
+replace the model before the database rejected its duplicate Model Metadata.
+An interrupted overwrite could also pair a new model with an old manifest.
+
+Publication now has one owner in ArtifactStore. Callers still call
+`store.save(model, manifest)` and receive the final directory. Each writer owns
+separate staging, and the kernel rejects an occupied destination at publication
+time. A preliminary existence check alone is insufficient because ordinary
+rename can replace an empty directory created after that check.
+
+We chose native no-replacement rename over a shared lock file. A lock would
+require every writer to follow the same protocol and preserve the same lock
+inode. The native operation enforces no-replacement without that shared state.
+The tradeoff is a small Linux-specific binding and a filesystem capability
+requirement. Public interfaces and the two-file Artifact layout do not change.
+
+`tests/test_artifact.py` covers occupied destinations, interrupted writes,
+unsupported publication, staging isolation, and historical loading.
+`tests/test_artifact_publication.py` coordinates spawned writers and kills them
+before and after publication. `tests/test_runner.py` reloads every successful
+Sweep Artifact after the Sweep finishes and checks its own recorded metrics.
+
+Death after publication can leave a complete Artifact without a completed Run
+Ledger entry. The Artifact remains authoritative. A retry with the same version
+fails rather than replacing it. SIGKILL cannot execute Run Ledger cleanup, so
+this filesystem guarantee does not guarantee a terminal Training Run after
+process death.
 
 ### The manifest pinned columns but not encoding (2026-07-29)
 

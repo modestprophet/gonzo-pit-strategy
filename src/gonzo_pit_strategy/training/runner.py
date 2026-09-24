@@ -2,25 +2,25 @@
 Experiment runner for executing training pipelines.
 """
 
+import logging
 import os
-import time
-from keras import callbacks
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+from uuid import uuid4
 
 import keras
+from keras import callbacks
 
-from gonzo_pit_strategy.training.config import TrainingConfig
-from gonzo_pit_strategy.training.data import load_training_data, TrainingDataSource
-from gonzo_pit_strategy.training.model_factory import build_model
+from gonzo_pit_strategy.config.config import PathsConfig
+from gonzo_pit_strategy.training.artifact import ArtifactManifest, ArtifactStore
 from gonzo_pit_strategy.training.callbacks import (
     ConsoleMetricsCallback,
     EpochMetricsCallback,
 )
-from gonzo_pit_strategy.training.artifact import ArtifactManifest, ArtifactStore
+from gonzo_pit_strategy.training.config import TrainingConfig
+from gonzo_pit_strategy.training.data import TrainingDataSource, load_training_data
 from gonzo_pit_strategy.training.ledger import RunLedger
-from gonzo_pit_strategy.config.config import PathsConfig
-import logging
+from gonzo_pit_strategy.training.model_factory import build_model
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +95,7 @@ class Experiment:
         model = build_model(self.config, input_shape, output_shape)
         model.summary()
 
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        model_version = f"{self.config.model.type}_{timestamp}"
+        model_version = f"{self.config.model.type}_{uuid4().hex}"
 
         with self.ledger.run(self.config, environment=self.environment) as run:
             # 3. Setup Callbacks — per-epoch concerns only.

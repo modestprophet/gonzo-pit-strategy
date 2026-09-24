@@ -34,7 +34,7 @@ notebooks = [
 
 [project.scripts]
 gonzo-train = "gonzo_pit_strategy.cli.train:main"
-gonzo-load = "gonzo_pit_strategy.utils.db_setup:main"
+gonzo-load = "gonzo_pit_strategy.cli.load:main"
 
 [build-system]
 requires = ["hatchling"]

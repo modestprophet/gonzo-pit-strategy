@@ -14,6 +14,10 @@ disk and require that it reproduces the evaluated model *exactly*. That holds
 whether or not EarlyStopping restored anything, so it cannot pass vacuously.
 """
 
+from contextlib import contextmanager
+from types import SimpleNamespace
+from uuid import UUID
+
 import numpy as np
 import pytest
 
@@ -93,6 +97,13 @@ def test_completed_run_is_recorded_once_with_the_artifact_path(
 ):
     result = _experiment(config, raw_dataset, tmp_path, ledger).run()
 
+    model_type, identity = result.model_version.rsplit("_", 1)
+    assert model_type == config.model.type
+    assert len(result.model_version) <= 50
+    parsed_identity = UUID(hex=identity)
+    assert parsed_identity.version == 4
+    assert identity == parsed_identity.hex
+
     assert len(ledger.runs) == 1, "ADR 0002 §3: one record, written at train end"
     record = ledger.last
     assert record.status == "COMPLETED"
@@ -155,9 +166,73 @@ def test_run_is_closed_as_failed_when_fit_raises(
     assert ledger.last.manifest is None, "no model row for a run that never finished"
 
 
+def test_save_failure_marks_run_failed_without_publishing_artifact(
+    config, raw_dataset, tmp_path, ledger, monkeypatch
+):
+    import keras
+
+    real_save = keras.Model.save
+
+    def failing_save(model, filepath, *args, **kwargs):
+        real_save(model, filepath, *args, **kwargs)
+        raise OSError("Keras save failed")
+
+    monkeypatch.setattr(keras.Model, "save", failing_save)
+
+    with pytest.raises(OSError, match="Keras save failed"):
+        _experiment(config, raw_dataset, tmp_path, ledger).run()
+
+    assert len(ledger.runs) == 1
+    assert ledger.last.status == "FAILED"
+    assert ledger.last.metrics
+    assert ledger.last.manifest is None
+    assert ledger.last.artifact_path is None
+    assert list((tmp_path / "artifacts").iterdir()) == []
+
+
+def test_mirror_completion_failure_leaves_saved_artifact_loadable(
+    config, raw_dataset, tmp_path, ledger
+):
+    from gonzo_pit_strategy.training.artifact import ArtifactStore
+    from gonzo_pit_strategy.training.data import load_training_data
+
+    class FailingMirrorLedger:
+        @contextmanager
+        def run(self, config, *, environment="local"):
+            with ledger.run(config, environment=environment) as recorder:
+                def fail_completion(*args, **kwargs):
+                    raise RuntimeError("mirror completion failed")
+
+                yield SimpleNamespace(
+                    run_id=recorder.run_id,
+                    model_id=recorder.model_id,
+                    record_epoch=recorder.record_epoch,
+                    complete=fail_completion,
+                )
+
+    with pytest.raises(RuntimeError, match="mirror completion failed"):
+        _experiment(config, raw_dataset, tmp_path, FailingMirrorLedger()).run()
+
+    assert len(ledger.runs) == 1
+    assert ledger.last.status == "FAILED"
+    assert ledger.last.metrics
+    assert ledger.last.manifest is None
+    assert ledger.last.artifact_path is None
+    (artifact_dir,) = (tmp_path / "artifacts").iterdir()
+    reloaded, manifest = ArtifactStore(tmp_path / "artifacts").load(artifact_dir.name)
+    assert manifest.model_version == artifact_dir.name
+    assert manifest.training_config == config.model_dump(mode="json")
+    data = load_training_data(config, StubDataSource(raw_dataset))
+    evaluation = reloaded.evaluate(
+        data.X_test, data.y_test, verbose=0, return_dict=True
+    )
+    assert evaluation == pytest.approx(manifest.test_metrics, rel=1e-5)
+
+
 def test_sweep_records_one_run_per_experiment(config, raw_dataset, tmp_path):
     from gonzo_pit_strategy.config.config import PathsConfig
     from gonzo_pit_strategy.training.artifact import ArtifactStore
+    from gonzo_pit_strategy.training.data import load_training_data
     from gonzo_pit_strategy.training.sweep import Sweep, SweepConfig
 
     ledger = InMemoryRunLedger()
@@ -180,3 +255,33 @@ def test_sweep_records_one_run_per_experiment(config, raw_dataset, tmp_path):
     assert [it.error for it in results] == [None, None]
     assert len(ledger.runs) == 2
     assert {r.status for r in ledger.runs} == {"COMPLETED"}
+    completed = [it.result for it in results if it.result is not None]
+    assert len(completed) == 2
+    assert len({result.model_version for result in completed}) == 2
+    assert len({result.artifact_path for result in completed}) == 2
+
+    store = ArtifactStore(tmp_path / "artifacts")
+    for iteration, record in zip(results, ledger.runs, strict=True):
+        result = iteration.result
+        assert result is not None
+        reloaded, manifest = store.load(result.model_version)
+        assert manifest.model_version == result.model_version
+        assert manifest.training_config == iteration.config.model_dump(mode="json")
+        assert record.config == iteration.config
+        assert record.artifact_path == result.artifact_path
+        assert record.manifest == manifest
+
+        recorded_metrics = {
+            metric.name: metric.value
+            for metric in record.metrics
+            if metric.split == "TEST"
+        }
+        assert recorded_metrics == pytest.approx(
+            {"loss": result.test_loss, **result.test_metrics}
+        )
+        assert manifest.test_metrics == pytest.approx(recorded_metrics)
+        data = load_training_data(iteration.config, StubDataSource(raw_dataset))
+        evaluation = reloaded.evaluate(
+            data.X_test, data.y_test, verbose=0, return_dict=True
+        )
+        assert evaluation == pytest.approx(recorded_metrics, rel=1e-5)

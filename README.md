@@ -92,26 +92,40 @@ uv run gonzo-load \
 
 | Phase | What it does |
 |---|---|
-| `init` | Creates the database, the `f1db` schema, and the application role via `db/init_db.sql` |
+| `init` | Creates the database, the schema, and the App Role via `db/init_db.sql` |
 | `migrate` | Applies goose migrations from `db/migrations/` |
-| `load` | `psql \copy` of the 18 Jolpica CSVs into `f1db.*` |
+| `load` | `COPY` of the 18 Jolpica CSVs into `f1db.*`, in one transaction |
+
+Phases always run in that order — `--steps load,init` requests both, it does not
+request loading first — and stop at the first failure. The ordering rule, the
+Load Plan, and the failure rules live in `db/provisioning.py`; `cli/load.py` is
+argparse and printing.
 
 Credentials are command-line arguments rather than config here: this runs before
-the application has a database to connect to.
+the application has a database to connect to. The two roles are not
+interchangeable — `init` needs both, `migrate` needs the admin role, `load` needs
+the app role — so a run missing a credential a requested phase needs fails before
+creating anything.
 
-Verify — check row counts, not just that tables exist:
+The load prints rows written per table, so the verification that means something
+is the command's own output:
 
-```bash
-psql -h localhost -U gonzo_user -d f1db \
-  -c "select relname, n_live_tup from pg_stat_user_tables
-      where schemaname='f1db' order by n_live_tup desc"
+```
+--- Rows loaded ---
+laps                           664,773
+session_entries                 48,248
+round_entries                   27,261
+total                          814,211
 ```
 
 A correct load puts ~665k rows in `laps`, ~48k in `session_entries` and ~27k in
-`round_entries`. All-zero counts with a success message was a real failure mode:
-`psql` exits 0 on a failed `\copy` unless `ON_ERROR_STOP=1` is set, so every load
-error was reported as a success. Fixed, but the row-count check is still the
-verification that means something.
+`round_entries`. (`base_teams` and `penalties` load zero rows — their Jolpica
+CSVs are header-only.) All-zero counts with a success message was a real failure
+mode: `psql` exits 0 on a failed `\copy` unless `ON_ERROR_STOP=1` is set, so
+every load error was reported as a success. The load now runs `COPY` in-process,
+where a failure raises rather than returning an exit code, and the whole plan
+runs in one transaction — so a failed load leaves the database as it was rather
+than partially populated.
 
 Common failures: *database already exists* is handled and skipped; *permission
 denied* means the admin role lacks `CREATEDB`; *goose not found* means the Go

@@ -15,7 +15,7 @@ except where marked *unverified*. Gates 2–5 were last re-run green on
 |---|---|
 | `--steps init` | Harmless but pointless; the database already exists |
 | `--steps migrate` | **Required** — and the step where the risk lives (see Gate 1) |
-| `--steps load` | **Do not run.** The tables are already populated and the loader is a bare `\copy` with no `ON CONFLICT`; it will fail on primary keys, and any table that *did* accept rows would be silently duplicated |
+| `--steps load` | **Do not run.** The tables are already populated and the Load is a bare `COPY` with no `ON CONFLICT`; it will fail on primary keys. Since 2026-08-03 the whole Load runs in one transaction, so such a failure rolls back rather than leaving partially duplicated tables — but a snapshot still has nothing to gain from running it |
 | `dbt build` | Fine, but it drops and recreates everything in `f1db_ml_prep` — derived data only, never `f1db.*` |
 
 So the snapshot protocol is `migrate` → `dbt build` → `train`, never `load`.

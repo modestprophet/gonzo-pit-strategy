@@ -1,0 +1,1157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>gonzo-pit-strategy: architecture explorer</title>
+<style>
+:root {
+  --bg: #fbfbfa; --panel: #ffffff; --ink: #1a1a19; --mute: #6b6b66;
+  --line: #ddddd6; --edge: #b9b9b0; --hot: #1e7f6a; --hot-soft: #d9efe8;
+  --box: #ffffff; --box-hot: #f2faf7; --code: #f2f2ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16161a; --panel: #1d1d22; --ink: #e8e8e4; --mute: #97978f;
+    --line: #32323a; --edge: #4a4a53; --hot: #5cc8a8; --hot-soft: #1d3a32;
+    --box: #22222a; --box-hot: #1e2d29; --code: #26262e;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+code, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+
+header { padding: 20px 24px 14px; border-bottom: 1px solid var(--line); }
+header h1 { margin: 0; font-size: 19px; font-weight: 620; letter-spacing: -0.01em; }
+header p { margin: 4px 0 0; color: var(--mute); font-size: 13.5px; max-width: 78ch; }
+.tabs { margin-top: 14px; display: flex; gap: 6px; flex-wrap: wrap; }
+.tabs button {
+  font: inherit; font-size: 13.5px; padding: 5px 13px; border-radius: 999px;
+  border: 1px solid var(--line); background: transparent; color: var(--mute); cursor: pointer;
+}
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.subtabs { margin-top: 8px; }
+.subtabs button { font-size: 12.5px; padding: 3px 11px; }
+.subtabs button[aria-selected="true"] { background: var(--hot); border-color: var(--hot); color: #fff; }
+.subtabs.off { display: none; }
+
+main { display: flex; align-items: flex-start; gap: 0; }
+#stage { flex: 1 1 auto; min-width: 0; padding: 22px 24px 60px; position: relative; }
+#edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.edge { fill: none; stroke: var(--edge); stroke-width: 1.1; opacity: .28; marker-end: url(#arrow); }
+.edge.hot { stroke: var(--hot); stroke-width: 1.7; opacity: 1; marker-end: url(#arrow-hot); }
+.faded .edge:not(.hot) { opacity: .07; }
+
+.graph.off { display: none; }
+.layer { position: relative; margin-bottom: 22px; }
+.layer > h2 {
+  margin: 0 0 8px; font-size: 10.5px; font-weight: 640; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--mute);
+}
+.row { display: flex; flex-wrap: wrap; gap: 10px; }
+.node {
+  position: relative; z-index: 1; text-align: left; font: inherit; cursor: pointer;
+  background: var(--box); border: 1px solid var(--line); border-radius: 9px;
+  padding: 9px 12px; min-width: 168px; max-width: 250px; flex: 0 1 auto;
+  transition: opacity .12s, border-color .12s, background .12s;
+}
+.node .nm { display: block; font-size: 13.5px; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.node .rl { display: block; font-size: 11.5px; color: var(--mute); margin-top: 2px; line-height: 1.35; }
+.node:hover, .node:focus-visible { border-color: var(--hot); outline: none; }
+.node.hot { border-color: var(--hot); background: var(--box-hot); }
+.node.sel { border-color: var(--hot); background: var(--box-hot); box-shadow: 0 0 0 2px var(--hot-soft); }
+.faded .node:not(.hot):not(.sel) { opacity: .42; }
+.node.ext { border-style: dashed; background: transparent; }
+.node.small { min-width: 120px; padding: 6px 10px; }
+.node.small .nm { font-size: 12.5px; }
+
+#flow { display: none; }
+#flow.on { display: block; }
+.intro { margin: 0 0 16px; color: var(--mute); font-size: 13.5px; max-width: 78ch; }
+.step { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 6px; }
+.step .no {
+  flex: 0 0 44px; text-align: right; padding-top: 10px; color: var(--mute);
+  font-size: 12px; font-family: ui-monospace, Menlo, monospace;
+}
+.step .node { flex: 1 1 auto; max-width: none; min-width: 0; }
+.step .tag, .detail-tag {
+  display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+  font-size: 10.5px; background: var(--code); color: var(--mute); vertical-align: 1px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.step .tag.role-admin, .detail-tag.role-admin { background: var(--hot-soft); color: var(--hot); }
+.step .tag.role-app, .detail-tag.role-app { background: var(--hot-soft); color: var(--hot); }
+.arrow { color: var(--mute); font-size: 12px; margin: 0 0 6px 56px; white-space: pre; }
+
+aside {
+  flex: 0 0 400px; align-self: stretch; min-height: 100vh; padding: 22px 24px 60px;
+  background: var(--panel); border-left: 1px solid var(--line);
+}
+aside h3 { margin: 0; font-size: 16px; font-family: ui-monospace, Menlo, monospace; font-weight: 640; }
+aside .path { margin: 3px 0 14px; font-size: 12px; color: var(--mute); font-family: ui-monospace, Menlo, monospace; }
+aside p { margin: 0 0 12px; font-size: 13.5px; }
+aside h4 {
+  margin: 18px 0 7px; font-size: 10.5px; font-weight: 640; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--mute);
+}
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip {
+  font: inherit; font-size: 12px; font-family: ui-monospace, Menlo, monospace; cursor: pointer;
+  padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line);
+  background: transparent; color: var(--ink);
+}
+.chip:hover { border-color: var(--hot); color: var(--hot); }
+.chip.flat { cursor: default; color: var(--mute); }
+.chip.flat:hover { border-color: var(--line); color: var(--mute); }
+.sym { border-top: 1px solid var(--line); }
+.sym summary {
+  cursor: pointer; padding: 7px 2px; font-size: 13px; list-style: none;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.sym summary::-webkit-details-marker { display: none; }
+.sym summary::before { content: "+ "; color: var(--mute); }
+.sym[open] summary::before { content: "\2212  "; }
+.sym summary .sig { color: var(--mute); font-size: 12px; }
+.sym p { margin: 0 0 10px 14px; font-size: 12.5px; color: var(--mute); }
+.notes { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--mute); }
+.notes li { margin-bottom: 5px; }
+.empty { color: var(--mute); font-size: 13.5px; }
+
+@media (max-width: 940px) {
+  main { flex-direction: column; }
+  aside { flex: 1 1 auto; width: 100%; min-height: 0; border-left: none; border-top: 1px solid var(--line); }
+  #edges { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>gonzo-pit-strategy: architecture explorer</h1>
+  <p>Three programs share one Postgres database: <code>gonzo-load</code> provisions it, <code>dbt build</code>
+  turns the raw tables into a training dataset, and <code>gonzo-train</code> trains against that and writes a
+  self-describing Artifact that inference loads with no database at all. <b>Modules</b> is the import graph of
+  <code>src/gonzo_pit_strategy/</code>. <b>Flows</b> walks each program step by step, tagged with the credential
+  path it runs under. <b>dbt lineage</b> is the model DAG from the Jolpica source tables to
+  <code>prep_training_dataset</code>. Click a box for detail; click a symbol to expand it. A developer tool, not
+  part of the package, and hand-written: nothing pins it to the source tree yet.</p>
+  <div class="tabs" role="tablist">
+    <button id="tab-modules" role="tab" aria-selected="true">Modules</button>
+    <button id="tab-flow" role="tab" aria-selected="false">Flows</button>
+    <button id="tab-lineage" role="tab" aria-selected="false">dbt lineage</button>
+  </div>
+  <div class="tabs subtabs off" id="subtabs" role="tablist"></div>
+</header>
+
+<main>
+  <section id="stage">
+    <svg id="edges" aria-hidden="true">
+      <defs>
+        <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="var(--edge)"></path>
+        </marker>
+        <marker id="arrow-hot" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="var(--hot)"></path>
+        </marker>
+      </defs>
+    </svg>
+    <div id="graph-modules" class="graph"></div>
+    <div id="graph-lineage" class="graph off"></div>
+    <div id="flow"></div>
+  </section>
+  <aside id="detail"></aside>
+</main>
+
+<script type="application/json" id="model">
+{
+  "graphs": {
+    "modules": {
+      "label": "Modules",
+      "out_label": "Imports",
+      "in_label": "Imported by",
+      "layers": [
+        {"id": "entry",    "label": "Entry points: wiring and printing, no decisions"},
+        {"id": "orch",     "label": "Orchestration: the ordering decisions"},
+        {"id": "seam",     "label": "Seams: interfaces in training's own vocabulary"},
+        {"id": "adapter",  "label": "Adapters: one live, one fake, held to one contract"},
+        {"id": "contract", "label": "Contracts and values"},
+        {"id": "config",   "label": "Configuration and secrets"},
+        {"id": "db",       "label": "Database plumbing"},
+        {"id": "ext",      "label": "Outside the package"}
+      ],
+      "nodes": [
+        {
+          "id": "cli.load", "name": "cli/load.py", "layer": "entry", "path": "src/gonzo_pit_strategy/cli/load.py",
+          "role": "gonzo-load: argv in, three phases out",
+          "purpose": "Builds a DatabaseTarget and two Roles from command-line arguments, calls Provisioning, and prints the report. The CLI owns no phase-to-role table or credential checks. db/provisioning.py owns phase selection, ordering, credential requirements, and the Load Plan. Credentials arrive as arguments. AppConfig supplies logging settings.",
+          "expects": "--db-host/--db-port/--db-name/--db-schema, the Admin Role and App Role flags, --data-directory, and --steps (init, migrate, load, or all)",
+          "produces": "rows loaded per table and a total on stdout, or exit 1 with the ProvisioningError message",
+          "symbols": [
+            {"name": "build_parser", "sig": "() -> ArgumentParser", "note": "Defaults: localhost:5432, database and schema both f1db, data directory data/raw under the repo root."},
+            {"name": "main", "sig": "() -> None", "note": "Build the target and roles, call the module's parse_steps, then Provisioner.provision. A single error handler logs ProvisioningError and exits 1. Missing-credential messages name role fields without exposing their values. A successful Load prints the Load Report."}
+          ]
+        },
+        {
+          "id": "cli.train", "name": "cli/train.py", "layer": "entry", "path": "src/gonzo_pit_strategy/cli/train.py",
+          "role": "gonzo-train: hydrate config, wire adapters, run",
+          "purpose": "The entry point owns the wiring (ADR 0001): it builds AppConfig, the ConnectionPool, the DatabaseDataSource, the ArtifactStore and the PostgresRunLedger, and injects them into an Experiment or a Sweep. Nothing downstream constructs its own collaborators, which is why tests can drive a real Experiment with a temp directory and an in-memory ledger.",
+          "expects": "--config PATH (a TrainingConfig JSON), or --grid-search PATH on top of it, or --generate-default",
+          "produces": "log lines with run id, model version and test loss; a results table under --grid-search; exit 1 on an invalid config or a failed experiment",
+          "symbols": [
+            {"name": "main", "sig": "() -> None", "note": "--generate-default writes TrainingConfig() to config/experiments/training_config_default.json and returns before the pool is built, so it needs no database. Otherwise: pool, adapters, then either one Experiment or a Sweep whose iterations are printed as they finish."}
+          ],
+          "notes": [
+            "Invalid configuration fails before training starts: TrainingConfig(**config_dict) is a pydantic validation and a typo or an out-of-range value is a sys.exit(1) here.",
+            "Paths come from app_config.paths, never os.getcwd()."
+          ]
+        },
+        {
+          "id": "ext.dbt", "name": "dbt build", "layer": "entry", "kind": "external", "path": "dbt/",
+          "role": "the third program: raw tables to training dataset",
+          "purpose": "A separate dbt project with its own authentication through dbt/profiles.yml and the F1DB_HOST, F1DB_USER, F1DB_PASSWORD variables. It never sees AppConfig. It reads f1db.* and materializes f1db_staging, f1db_intermediate and f1db_features as views and f1db_ml_prep as tables, creating those schemas on first run, which is why the App Role needs CREATE ON DATABASE. The dbt lineage tab draws the models.",
+          "expects": "f1db.* loaded, dbt deps run, the three F1DB_* variables exported",
+          "produces": "f1db_ml_prep.prep_training_dataset, 25,873 rows by 408 columns, plus prep_scaling_params and prep_category_mappings",
+          "notes": [
+            "profiles.yml hardcodes port 5432 and dbname f1db; only host, user and password are parameterized.",
+            "dbt build drops and recreates everything in its four schemas. Derived data only, never f1db.*, but readers of those tables see them vanish mid-build."
+          ]
+        },
+
+        {
+          "id": "training.runner", "name": "training/runner.py", "layer": "orch", "path": "src/gonzo_pit_strategy/training/runner.py",
+          "role": "Experiment: load, build, fit, evaluate, save, mirror",
+          "purpose": "One training lifecycle as straight-line code. The order is the contract: train, then evaluate, then write the Artifact from the model those metrics were measured on, then mirror to the database. Expressed as on_train_end callbacks this ordering once depended on list position against EarlyStopping's weight restore and silently produced an Artifact the reported metrics did not describe (ADR 0002). The ArtifactStore and the Run Ledger are injected, so a test drives a real Experiment with no patching.",
+          "expects": "a TrainingConfig, a TrainingDataSource, an ArtifactStore, a RunLedger, and PathsConfig",
+          "produces": "an ExperimentResult, models/artifacts/<version>/, TensorBoard logs, and the rows the Run Ledger writes",
+          "symbols": [
+            {"name": "Experiment.run", "sig": "() -> ExperimentResult", "note": "load_training_data, build_model, then inside `with ledger.run(config) as run:` the callbacks are assembled (EarlyStopping with restore_best_weights when patience > 0, ConsoleMetricsCallback, TensorBoard, EpochMetricsCallback), model.fit runs, model.evaluate(return_dict=True) measures the in-memory model, ArtifactStore.save writes it, and run.complete mirrors it. Leaving the block by exception marks the run FAILED."},
+            {"name": "ExperimentResult", "sig": "dataclass", "note": "model_version, model_id, run_id, test_loss, test_metrics, history, artifact_path. What the CLI and a Sweep see."}
+          ],
+          "notes": [
+            "model_version is <model type>_<uuid4 hex>. It names the Artifact directory, TensorBoard directory, and Model Metadata row. Full UUIDs use 38 characters for dense and 39 for bilstm, below the database limit of 50.",
+            "return_dict=True matters: zipping positionally against model.metrics_names labels the metric compile_metrics under Keras 3, tolerable in a log line but not in the manifest's permanent record.",
+            "tests/test_runner.py reloads each saved Artifact and compares its evaluated metrics with the Training Run. The Sweep test reloads every result after all Experiments finish and checks distinct versions and paths.",
+            "Publication failure marks the Training Run FAILED on an ordinary exception. Mirror failure leaves the published Artifact loadable. SIGKILL cannot execute Run Ledger cleanup and can leave a Training Run RUNNING."
+          ]
+        },
+        {
+          "id": "training.sweep", "name": "training/sweep.py", "layer": "orch", "path": "src/gonzo_pit_strategy/training/sweep.py",
+          "role": "Sweep: one Experiment per grid point",
+          "purpose": "Generates the cartesian product of a parameter grid over a base TrainingConfig and runs an Experiment for each, yielding as it goes. A failed iteration is yielded with its error and the sweep continues, which is exactly why the Run Ledger is a context manager: a crash inside one experiment must not leave a row stuck at RUNNING.",
+          "expects": "a SweepConfig (base config plus {dotted.key: [values]}), and the same adapters an Experiment takes",
+          "produces": "an iterator of SweepIterationResult, each carrying a result or an error",
+          "symbols": [
+            {"name": "SweepConfig", "sig": "BaseModel", "note": "base_config, parameters, sweep_name. Keys are dot-separated paths such as model.dropout_rate."},
+            {"name": "Sweep._generate_configs", "sig": "() -> list[TrainingConfig]", "note": "itertools.product over the values, _set_nested_value for each dotted key, adds a grid_search tag and appends the parameter description to the config's description. A combination that fails validation is logged and skipped."},
+            {"name": "Sweep.run", "sig": "() -> Iterator[SweepIterationResult]", "note": "Builds and runs an Experiment per config with the shared data source, store and ledger."}
+          ]
+        },
+        {
+          "id": "db.provisioning", "name": "db/provisioning.py", "layer": "orch", "path": "src/gonzo_pit_strategy/db/provisioning.py",
+          "role": "Provisioner: Init, Migrate, Load, in that order",
+          "purpose": "Takes a Postgres server from empty to a migrated, loaded f1db. Provisioning owns the requested phase selection and checks all required credential fields before starting. Each selected phase runs once, in Init, Migrate, Load order. Standalone phase calls enforce their own credential requirements through the same rules. File checks remain local to the phase that needs them. This module does not build the dbt dataset or train models.",
+          "expects": "a DatabaseTarget, an Admin Role and an App Role, and for Load a directory holding every file in the Load Plan",
+          "produces": "a ProvisionReport listing the phases that ran and, after a Load, rows written per table",
+          "symbols": [
+            {"name": "LOAD_PLAN", "sig": "((csv, table), ...) x 18", "note": "Jolpica CSV files and their target tables in foreign-key order: round_entries references rounds, laps reference session_entries. Domain knowledge, not configuration, and not alphabetical. Every entry is required; dbt's lineage needs all of them, and a partial load builds cleanly while being silently wrong."},
+            {"name": "parse_steps", "sig": "(raw) -> list[Step]", "note": "Splits and normalizes command-line names, expands all, then applies shared selection validation. An empty selection fails. Unknown names fail even beside all. Duplicate and reversed names select phases rather than specifying an execution sequence."},
+            {"name": "_normalize_steps", "sig": "(steps) -> list[Step]", "note": "Validates the complete selection, removes duplicates, and returns Init, Migrate, Load order. Both parse_steps and provision use it, so direct callers do not need the text parser to get these guarantees."},
+            {"name": "_REQUIRED_ROLES", "sig": "{Step: role names}", "note": "The shared phase policy. Init requires Admin Role and App Role, Migrate requires only Admin Role, and Load requires only App Role."},
+            {"name": "Provisioner._require_credentials", "sig": "(steps) -> None", "note": "Checks required username and password fields across the requested phases. Raises ProvisioningError listing all missing role fields, never their values. It does not authenticate credentials or require unused roles. provision and each standalone phase call this validator."},
+            {"name": "Provisioner.provision", "sig": "(steps, *, data_dir) -> ProvisionReport", "note": "Validates and orders the selection, checks every required credential field, and rejects Load without a data directory before any phase starts. Runs each phase once and stops at the first raised failure. Later phases' file checks do not run early."},
+            {"name": "Provisioner.initialize", "sig": "() -> None", "note": "Checks both roles, then checks and renders init_db.sql. Runs psql as the Admin Role against the postgres database. Existing Init error handling is unchanged: psql runs without ON_ERROR_STOP to tolerate database creation on a rerun. The template uses the \\c meta-command."},
+            {"name": "Provisioner.migrate", "sig": "() -> None", "note": "Checks the Admin Role and migrations directory, then runs goose up with f1db.goose_db_version as the version table. App Role credentials are not required. goose's stderr becomes the ProvisioningError message."},
+            {"name": "Provisioner.load", "sig": "(data_dir) -> LoadReport", "note": "Checks the App Role, then resolves every required CSV before connecting. Admin Role credentials are not required. Copies the Load Plan in foreign-key order through psycopg2 within one transaction. A failed copy raises and rolls back the Load."},
+            {"name": "render_init_sql", "sig": "(template, target, app) -> str", "note": "Substitutes already-quoted SQL for the placeholders. A name appears both as an identifier and, inside the pg_roles lookup, as a string literal, which quote differently, hence separate placeholders. Any {{...}} left over raises rather than reaching the server."},
+            {"name": "quote_literal", "sig": "(value) -> str", "note": "Passwords reach CREATE USER ... ENCRYPTED PASSWORD as literal text, so this is the one place quoting has to be right; an apostrophe in a password used to be a syntax error at best."},
+            {"name": "goose_connection_string", "sig": "(target, role) -> str", "note": "postgres://user:pass@host:port/db?sslmode=disable with the credentials URL-encoded."},
+            {"name": "copy_statement", "sig": "(target, table) -> str", "note": "COPY \"schema\".\"table\" FROM STDIN WITH (FORMAT CSV, HEADER, DELIMITER ',', NULL '')."},
+            {"name": "resolve_load_plan", "sig": "(data_dir, plan=LOAD_PLAN) -> list[(Path, table)]", "note": "Every file must exist; a missing one raises naming the file and its target table."},
+            {"name": "Role", "sig": "frozen dataclass(username, password)", "note": "repr redacts the password so it stays out of tracebacks and logs."},
+            {"name": "LoadReport", "sig": "frozen dataclass(rows)", "note": "Rows actually written per table, plus a total. Row counts are the verification that means something here: a silent zero-row load once reported success."},
+            {"name": "ProvisioningError", "sig": "RuntimeError", "note": "Phases raise rather than returning False, so a failure is decided once and logged once."}
+          ],
+          "notes": [
+            "Preflight checks phase selection, required credential fields, and the presence of a Load directory argument. It does not check all phases' files before starting. Init or Migrate may already have completed when Load discovers a missing CSV.",
+            "tests/test_provisioning_preflight.py covers direct requests and standalone phases. tests/test_load_cli.py exercises the real CLI entry point and verifies invalid requests cannot reach subprocess or database calls. tests/test_provisioning.py retains real-Postgres phase checks, including reversed and repeated selections.",
+            "A correct load puts about 665k rows in laps, 48k in session_entries and 27k in round_entries. base_teams and penalties load zero rows because their Jolpica CSVs are header-only.",
+            "Against a production snapshot the Load phase must be skipped: it is a bare COPY with no ON CONFLICT. See docs/E2E_FROM_PROD_SNAPSHOT.md."
+          ]
+        },
+
+        {
+          "id": "training.data", "name": "training/data.py", "layer": "seam", "path": "src/gonzo_pit_strategy/training/data.py",
+          "role": "TrainingDataSource, the fingerprint, and prepare_features",
+          "purpose": "The seam at which a RawDataset enters the training pipeline, plus the two functions that define what the model's input means. fingerprint_dataset identifies a DatasetVersion by content. prepare_features is the value-encoding half of the model's input contract: the Artifact Manifest fixes which columns and in what order, this fixes how their values are encoded, and both training and inference call it. Applying it in only one place is train/serve skew, which bit this project once (ADR 0002).",
+          "expects": "any object with a dataset_name property and a fetch_raw_data method; in production a SQLAlchemy Engine",
+          "produces": "LoadedData: six numpy splits, feature_names in training order, and a DatasetProvenance",
+          "adapters": ["training.data", "tests.conftest"],
+          "symbols": [
+            {"name": "TrainingDataSource", "sig": "Protocol", "note": "dataset_name and fetch_raw_data(). The source names itself because it knows what the data is; the fingerprint says which revision."},
+            {"name": "DatabaseDataSource", "sig": "class(engine, *, query=None, dataset_name=None)", "note": "The live adapter. Default query is SELECT * FROM f1db_ml_prep.prep_training_dataset, default name prep_training_dataset. A caller-supplied query gets a name derived from its hash, because dataset_versions is unique on (dataset_name, version) and two different datasets filed under one name collide there. Stashes the query in df.attrs['source_query'] for the fingerprint."},
+            {"name": "fingerprint_dataset", "sig": "(df, query='') -> str", "note": "sha256 over the query text, the row count, every column name and dtype, and the summed pandas row hash. Same data, same fingerprint, with no cooperation from dbt. Collation-dependent by way of column order: see the notes."},
+            {"name": "prepare_features", "sig": "(df) -> df", "note": "Object columns coerced to numeric (Postgres returns object for all-NULL numerics), every boolean column cast to int (the dbt one-hot columns), NaN filled with 0. Keys off dtype, not column-name prefix, so adding a one-hot family in dbt needs no Python change."},
+            {"name": "load_training_data", "sig": "(config, data_source) -> LoadedData", "note": "Fetch, fingerprint the raw frame before any transformation, prepare_features, drop the target and exclude_columns, then two train_test_split calls (test first, then validation sized relative to what is left) with config.random_state."},
+            {"name": "DatasetProvenance", "sig": "frozen dataclass", "note": "name, fingerprint, record_count, feature_count. One value travels from the source into both the Artifact Manifest and the Run Ledger, so the two cannot describe different data."},
+            {"name": "LoadedData", "sig": "dataclass", "note": "X_train, X_val, X_test, y_train, y_val, y_test, feature_names, provenance."}
+          ],
+          "notes": [
+            "The fingerprint is collation-dependent. prep_ohe_circuit builds its columns from a compile-time ORDER BY circuit_name, so a musl server sorts differently from glibc and shifts column order. Identical data, different fingerprint. Major version and libc must match between any two databases you compare.",
+            "It is also not yet reproducible across independently built databases, because feat_lagged's window key is not unique before 1965. Compare per-column hashes rather than the fingerprint until the warn-severity dbt test on feat_dnf_handled goes green."
+          ]
+        },
+        {
+          "id": "training.ledger", "name": "training/ledger.py", "layer": "seam", "path": "src/gonzo_pit_strategy/training/ledger.py",
+          "role": "RunLedger: everything the database records about a Training Run",
+          "purpose": "The interface only, in training's own vocabulary: Artifact Manifest, Dataset Provenance, epoch metrics. It imports nothing from db, so the dependency runs one way and the Postgres adapter imports these types rather than the reverse. The interface is a context manager because a Training Run has an invariant otherwise enforced only by discipline: it always reaches a terminal status. Leaving the block, by return or by exception, closes the run.",
+          "expects": "a TrainingConfig to open a run; then epoch logs and, once, a manifest, an artifact path and a provenance",
+          "produces": "a RunRecorder for the duration of the block",
+          "adapters": ["db.run_ledger", "tests.fakes"],
+          "symbols": [
+            {"name": "RunLedger", "sig": "Protocol", "note": "run(config, *, environment) -> ContextManager[RunRecorder]. The row is written before the block body starts, so the run is visible as RUNNING while training is in progress."},
+            {"name": "RunRecorder", "sig": "Protocol", "note": "run_id (available inside the block, for correlating logs), model_id (None until complete; ADR 0002 rejects placeholder rows), record_epoch(epoch, logs), complete(manifest, artifact_path, provenance, *, epochs_completed, config_source_path)."},
+            {"name": "split_metric", "sig": "(name) -> (metric_name, split_type)", "note": "A val_ prefix means VALIDATION, everything else TRAIN. One implementation beside the docstring that specifies it, so the two adapters cannot drift on this rule again."},
+            {"name": "TRAIN, VALIDATION, TEST", "sig": "str", "note": "Exactly the values the CHECK constraint on training_metrics.split_type allows."}
+          ],
+          "notes": [
+            "tests/test_run_ledger_contract.py runs one suite against both adapters. On its first run six assertions failed against the in-memory fake and none against Postgres; the fake was corrected to match."
+          ]
+        },
+        {
+          "id": "training.artifact", "name": "training/artifact.py", "layer": "seam", "path": "src/gonzo_pit_strategy/training/artifact.py",
+          "role": "ArtifactStore and ArtifactManifest: the one owner of artifact files",
+          "purpose": "An Artifact contains model.keras and manifest.json, with everything inference needs to load the model without a database. This module owns layout, publication, and loading. Each save writes into private staging beneath artifacts_root, then publishes the complete pair with atomic no-replacement rename. An occupied version is never overwritten. The database keeps the Artifact Manifest as a reporting mirror.",
+          "expects": "a root directory; a keras.Model and a manifest to save; a version string to load",
+          "produces": "<root>/<version>/model.keras and manifest.json",
+          "symbols": [
+            {"name": "ArtifactManifest", "sig": "BaseModel", "note": "model_name, model_version, architecture, feature_names in training order, target_column, training_config, framework_version, dataset_name, dataset_fingerprint, epochs_completed, test_metrics, created_at, created_by, description, tags. Experiment measures test_metrics on the model it publishes with this manifest."},
+            {"name": "ArtifactStore.save", "sig": "(model, manifest) -> Path", "note": "Reject an occupied version, write model.keras and manifest.json in a unique .gonzo-stage-* directory, then publish the directory atomically. FileExistsError rejects empty directories, files, symlinks, and identical retries. The kernel checks occupancy again at publication time. TemporaryDirectory cleans unpublished files on catchable failures, including KeyboardInterrupt."},
+            {"name": "_rename_noreplace", "sig": "(source, destination) -> None", "note": "Private ctypes binding to Linux renameat2 with RENAME_NOREPLACE. The complete staging directory becomes the final version in one operation. Missing native support or filesystem errors propagate without an ordinary-rename fallback. The binding is initialized only when saving."},
+            {"name": "ArtifactStore.load_manifest", "sig": "(version) -> ArtifactManifest", "note": "Read the existing manifest format without loading the model or requiring native publication support. Reject resolved paths into staging, including symlink aliases."},
+            {"name": "ArtifactStore.load", "sig": "(version) -> (keras.Model, ArtifactManifest)", "note": "Read the manifest, then call keras.models.load_model. Both file paths must be outside staging. Historical timestamp-named Artifacts and ordinary symlink aliases remain loadable. A directory without a manifest fails with the ADR 0002 compatibility message."},
+            {"name": "ArtifactStore.path_for", "sig": "(version) -> Path", "note": "Validate a single nonempty directory name and join it to the configured root. Reject traversal, the reserved .gonzo-stage- prefix, and roots inside staging. Old versions do not have to contain UUIDs."},
+            {"name": "ArtifactStore.delete", "sig": "(version) -> bool", "note": "Explicit deletion removes the Artifact directory and returns False if it is absent. It does not collect abandoned staging. Concurrent deletion is outside the publication contract."}
+          ],
+          "notes": [
+            "Publication guarantees apply to local Linux filesystems with no-replacement rename support. They cover competing writers, concurrent readers, ordinary errors, and abrupt process termination. They do not cover power-loss durability or concurrent deletion.",
+            "A killed writer leaves either unpublished staging or a complete Artifact. Loaders reject staging even when it contains both files. Automatic stale-directory cleanup is absent because it could remove an active writer's files.",
+            "tests/test_artifact_publication.py uses spawned writers and SIGKILL to check both sides of publication. tests/test_artifact.py covers collisions, partial writes, unsupported native publication, staging isolation, and historical loading.",
+            "Imports keras at module level, so config and data tests that do not touch this module run without TensorFlow."
+          ]
+        },
+
+        {
+          "id": "db.run_ledger", "name": "db/run_ledger.py", "layer": "adapter", "path": "src/gonzo_pit_strategy/db/run_ledger.py",
+          "role": "PostgresRunLedger: the only module that turns a run into SQL",
+          "purpose": "The live adapter for the Run Ledger seam. Callers never see a Session; they get a recorder and the transaction shape is this module's business. The database is a reporting mirror: the Artifact on disk stays authoritative and a failure here does not invalidate it.",
+          "expects": "a ConnectionPool",
+          "produces": "rows in training_runs, training_metrics, model_metadata and dataset_versions",
+          "symbols": [
+            {"name": "PostgresRunLedger.run", "sig": "(config, *, environment='local') -> Iterator[recorder]", "note": "Inserts a TrainingRun with model_id NULL and status RUNNING, yields, and on the way out marks the run FAILED if an exception escaped or complete() was never called. RUNNING would be a lie in either case."},
+            {"name": "_PostgresRunRecorder.record_epoch", "sig": "(epoch, logs) -> None", "note": "One TrainingMetric row per log key, split by split_metric, written as the epoch completes rather than buffered, so a crashed run still leaves the metrics that led up to it. An empty logs dict writes nothing."},
+            {"name": "_PostgresRunRecorder.complete", "sig": "(manifest, artifact_path, provenance, *, epochs_completed, config_source_path)", "note": "One transaction: the ModelMetadata row (with the manifest as JSONB configuration and artifact_path), the manifest's test_metrics as TEST-split rows at the last epoch index, the DatasetVersion upsert, and the run's terminal state. They land together or not at all. model_id is read inside the session because the instance expires on commit."},
+            {"name": "_PostgresRunRecorder._dataset_version_id", "sig": "(session, provenance) -> int", "note": "Upsert on (dataset_name, fingerprint[:16]). The 16-char truncation is why prod's stored version is short while fingerprint_dataset returns 64 chars; compare only the first 16. Re-training on unchanged data reuses the row, so several runs sharing one dataset_version_id is correct."},
+            {"name": "_PostgresRunRecorder.fail", "sig": "() -> None", "note": "Best effort. A run dies for reasons that may have taken the database with it, and the original exception is the informative one."}
+          ]
+        },
+        {
+          "id": "tests.fakes", "name": "tests/fakes.py", "layer": "adapter", "path": "tests/fakes.py",
+          "role": "InMemoryRunLedger: the second adapter, held to the same contract",
+          "purpose": "Stores what the Postgres adapter stores, in the same shape: metrics split by val_ prefix, test metrics recorded on complete, one DatasetVersion per fingerprint. Those are the interface as specified in training/ledger.py, not conveniences. A fake that accepts what Postgres rejects is worse than no fake at all, which is why the contract suite runs against both.",
+          "expects": "nothing",
+          "produces": "RecordedRun objects with RecordedMetric rows and a (name, version) list of dataset versions",
+          "symbols": [
+            {"name": "InMemoryRunLedger.run", "sig": "(config, *, environment) -> recorder", "note": "Same exit rules as Postgres: exception or no complete() means FAILED."},
+            {"name": "InMemoryRunLedger.last", "sig": "property -> RecordedRun", "note": "What tests assert against."},
+            {"name": "InMemoryRunRecorder.complete", "sig": "(...)", "note": "Sets model_id to the run id, records TEST metrics at epochs_completed - 1, registers the dataset version."}
+          ]
+        },
+        {
+          "id": "tests.conftest", "name": "tests/conftest.py", "layer": "adapter", "path": "tests/conftest.py",
+          "role": "StubDataSource, fixtures, and the optional scratch Postgres",
+          "purpose": "StubDataSource satisfies TrainingDataSource with a 50-row fixture frame carrying two boolean columns, so prepare_features has something to convert. The tiny_model fixture imports keras lazily so tests that need no model run without TensorFlow. The postgres_pool fixture skips when DEV_POSTGRES_URL is unset or unusable, and otherwise creates the ledger tables from ORM metadata so the contract suite runs against the real constraint surface.",
+          "expects": "optionally DEV_POSTGRES_URL",
+          "produces": "raw_dataset, tiny_model, ledger, postgres_pool and clean_postgres fixtures",
+          "symbols": [
+            {"name": "StubDataSource", "sig": "class(df, dataset_name='fixture_dataset')", "note": "fetch_raw_data returns a copy of the fixture."},
+            {"name": "clean_postgres", "sig": "fixture", "note": "TRUNCATE ... RESTART IDENTITY CASCADE over the four ledger tables before each test that touches them."}
+          ],
+          "notes": ["tests/probes.py adds read-back probes for both adapters. RunLedger deliberately exposes only run_id and model_id; the probes live beside the tests rather than widening the interface for no caller's benefit."]
+        },
+
+        {
+          "id": "training.config", "name": "training/config.py", "layer": "contract", "path": "src/gonzo_pit_strategy/training/config.py",
+          "role": "TrainingConfig and the polymorphic ModelConfig",
+          "purpose": "Pydantic models for one training run. The model field is a discriminated union on a Literal type: dense or bilstm today. Adding an architecture is a new config class here plus a builder in model_factory. Imports nothing from the package, and it must stay that way because AppConfig embeds it.",
+          "expects": "a JSON object, or nothing for the defaults",
+          "produces": "a validated TrainingConfig; out-of-range values fail before training starts",
+          "symbols": [
+            {"name": "TrainingConfig", "sig": "BaseModel", "note": "target_column (finish_position), exclude_columns, test_size, validation_size, random_state, model, batch_size, epochs, learning_rate, early_stopping_patience, tags, description."},
+            {"name": "DenseModelConfig", "sig": "type='dense'", "note": "hidden_layers, dropout_rate in [0, 1], activation, output_activation."},
+            {"name": "BiLSTMModelConfig", "sig": "type='bilstm'", "note": "lstm_units, dense_layers, dropout_rate, recurrent_dropout, activation, output_activation."}
+          ]
+        },
+        {
+          "id": "training.model_factory", "name": "training/model_factory.py", "layer": "contract", "path": "src/gonzo_pit_strategy/training/model_factory.py",
+          "role": "build_model: config to compiled keras.Model",
+          "purpose": "Dispatches on config.model.type and compiles with Adam at config.learning_rate, mse loss and mae as the metric. Loss is not configurable yet.",
+          "expects": "a TrainingConfig, the input shape, and the output width",
+          "produces": "a compiled keras.Model named dense_model or bilstm_model",
+          "symbols": [
+            {"name": "_build_dense", "sig": "(conf, input_shape, output_shape)", "note": "Dense then Dropout per hidden layer, then the output Dense."},
+            {"name": "_build_bilstm", "sig": "(conf, input_shape, output_shape)", "note": "load_training_data produces 2-D rows, so each row is reshaped into a length-1 sequence. Intermediate LSTM layers return sequences; the last collapses to one vector for the dense head."}
+          ]
+        },
+        {
+          "id": "training.callbacks", "name": "training/callbacks.py", "layer": "contract", "path": "src/gonzo_pit_strategy/training/callbacks.py",
+          "role": "per-epoch work only",
+          "purpose": "Only what genuinely needs an epoch boundary lives here. Everything that happens once per Experiment, opening the run, saving the Artifact, mirroring it, is sequential code in runner.py, because ordering between callbacks is invisible at the call site and got the Artifact written from the wrong weights once already.",
+          "expects": "a RunRecorder",
+          "produces": "training_metrics rows and console output per epoch",
+          "symbols": [
+            {"name": "EpochMetricsCallback", "sig": "Callback(run)", "note": "on_epoch_end forwards Keras' logs dict to run.record_epoch. Nothing outside the training loop can see an epoch boundary, so this one part must be a callback."},
+            {"name": "ConsoleMetricsCallback", "sig": "Callback", "note": "Prints training and validation metrics per epoch."}
+          ]
+        },
+        {
+          "id": "inference.predictor", "name": "inference/predictor.py", "layer": "contract", "path": "src/gonzo_pit_strategy/inference/predictor.py",
+          "role": "ModelPredictor: rehydrate from the Artifact, predict on raw rows",
+          "purpose": "The point of ADR 0002. The Artifact Manifest supplies the feature-ordering contract, so no database connection is required. predict on a DataFrame reorders columns to feature_names and applies prepare_features, so a raw slice of prep_training_dataset works directly. Copy the artifact directory and it carries everything required.",
+          "expects": "a model version and a PathsConfig, then a DataFrame or an already-ordered numpy array",
+          "produces": "np.ndarray of predictions",
+          "symbols": [
+            {"name": "load_predictor", "sig": "(model_version, paths=None) -> ModelPredictor", "note": "ArtifactStore(paths.artifacts_root), then the predictor."},
+            {"name": "ModelPredictor.predict", "sig": "(data) -> np.ndarray", "note": "A DataFrame missing any feature column raises naming the missing ones; otherwise data[feature_columns] then prepare_features. A numpy array is assumed already in training order and numeric."}
+          ],
+          "notes": ["tests/test_predictor.py covers rehydration without a database, column reordering, the missing-column error, and prediction on the raw fixture dtypes, which is what catches encoding skew."]
+        },
+
+        {
+          "id": "config", "name": "config/config.py", "layer": "config", "path": "src/gonzo_pit_strategy/config/config.py",
+          "role": "AppConfig: the one declared tree, hydrated at startup",
+          "purpose": "Every setting the application needs, in one file (ADR 0001). Environment variables map onto the tree with __ as the nesting delimiter, so AppConfig.db.host is DB__HOST; a single underscore matches no field and is silently dropped. Nothing under config/ or security/ reads os.environ. Vault is a settings source, optional, resolved during hydration rather than deferred until use.",
+          "expects": "constructor kwargs, the environment, .env, and optionally Vault",
+          "produces": "AppConfig with db, logging, paths, training and vault submodels",
+          "symbols": [
+            {"name": "AppConfig", "sig": "BaseSettings", "note": "Precedence: kwargs, then environment, then .env, then Vault, then field defaults. settings_customise_sources merges the earlier sources first to assemble AppConfig.vault, because Vault's own connection settings must be known before the Vault source can be built."},
+            {"name": "VaultSettingsSource", "sig": "PydanticBaseSettingsSource", "note": "Walks the model recursively; any field with json_schema_extra={'vault_path': ...} is fetched beneath mount_point. Initialization failure or a fetch failure logs a warning and falls through to the default rather than aborting, so missing secrets degrade while malformed configuration still fails fast."},
+            {"name": "VaultConfig", "sig": "BaseModel", "note": "addr, role_id, secret_id, mount_point (default secret/data/development). enabled only when all three credentials are present."},
+            {"name": "DatabaseConfig", "sig": "BaseModel", "note": "host, port, name (default gonzo), user (gonzo_user), password (default local_dev_password, vault_path 'password'). get_db_url builds the SQLAlchemy URL; get_pool_options is pool_size 5, max_overflow 10, timeout 30, recycle 1800."},
+            {"name": "PathsConfig", "sig": "BaseModel", "note": "artifacts_root (models/artifacts), tensorboard_dir (logs/tensorboard), experiments_dir (config/experiments). There is no checkpoint directory: the Artifact is the only model file writer."},
+            {"name": "LoggingConfig / setup_logging", "sig": "(config) -> None", "note": "basicConfig with force=True, called once at each entry point. Without it every module's logger has nowhere to go."}
+          ],
+          "notes": [
+            "Local defaults are development-only. Against prod, confirm AppConfig().db.host and .user resolve to prod's; a silent fallback to localhost and local_dev_password means Vault did not resolve.",
+            "AppConfig embeds TrainingConfig as its training field, so training/config.py must never import config/config.py."
+          ]
+        },
+        {
+          "id": "vault", "name": "security/vault.py", "layer": "config", "path": "src/gonzo_pit_strategy/security/vault.py",
+          "role": "Multipass: an hvac client with injected AppRole credentials",
+          "purpose": "Authenticates to HashiCorp Vault with AppRole and reads secrets. Credentials are injected by the caller; this class does not read the environment. hvac exceptions are translated into VaultAuthenticationError, VaultSecretError and VaultError.",
+          "expects": "url, role_id, secret_id",
+          "produces": "get_secret(path, key=None) returning the data dict or one key; list_secrets; is_authenticated",
+          "symbols": [
+            {"name": "Multipass", "sig": "class(url, role_id, secret_id)", "note": "Raises VaultAuthenticationError if any credential is missing, then logs in via client.auth.approle.login."},
+            {"name": "handle_vault_errors", "sig": "decorator", "note": "Maps Unauthorized, InvalidPath and VaultError onto the package's exception types."}
+          ]
+        },
+
+        {
+          "id": "db.pool", "name": "db/connection_pool.py", "layer": "db", "path": "src/gonzo_pit_strategy/db/connection_pool.py",
+          "role": "ConnectionPool: an Engine and a session factory, built once by the entry point",
+          "purpose": "SQLAlchemy engine with QueuePool from a DatabaseConfig. Instantiated explicitly by the entry point and passed down; there is no module-level singleton and no init_db, which is the pattern ADR 0001 rejects.",
+          "expects": "a DatabaseConfig",
+          "produces": "engine, get_session(), dispose()",
+          "symbols": [
+            {"name": "ConnectionPool", "sig": "class(db_config)", "note": "Logs driver, host, port and database at creation, never the password."}
+          ]
+        },
+        {
+          "id": "db.base", "name": "db/base.py", "layer": "db", "path": "src/gonzo_pit_strategy/db/base.py",
+          "role": "Base and db_session(pool)",
+          "purpose": "The declarative Base every ORM model extends, and the session context manager: commit on success, rollback and re-raise on exception, close always. It takes the pool as an argument at the two call sites that need it rather than reaching for a global.",
+          "expects": "a ConnectionPool",
+          "produces": "a Session for the duration of the block",
+          "symbols": [
+            {"name": "db_session", "sig": "(pool) -> Session", "note": "Used by the Postgres ledger and the test probes. Nothing in training imports it."}
+          ]
+        },
+        {
+          "id": "db.models", "name": "db/models/", "layer": "db", "path": "src/gonzo_pit_strategy/db/models/",
+          "role": "the four ledger tables as ORM classes",
+          "purpose": "TrainingRun, TrainingMetric, ModelMetadata and DatasetVersion, all in schema f1db. The ORM carries the UNIQUE and CHECK constraints, so creating from metadata in the contract suite gives the real constraint surface.",
+          "expects": "-",
+          "produces": "-",
+          "symbols": [
+            {"name": "TrainingRun", "sig": "training_runs", "note": "model_id nullable (migration 003, re-asserted by 005), dataset_version_id, start_time, end_time, status in PENDING/RUNNING/COMPLETED/FAILED/CANCELLED, epochs_completed, early_stopping, environment_id."},
+            {"name": "TrainingMetric", "sig": "training_metrics", "note": "run_id (cascade delete), epoch, timestamp, metric_name, metric_value, split_type in TRAIN/VALIDATION/TEST."},
+            {"name": "ModelMetadata", "sig": "model_metadata", "note": "name, version, architecture, framework_version, tags, configuration JSONB, config_source_path, artifact_path. Unique on (name, version)."},
+            {"name": "DatasetVersion", "sig": "dataset_versions", "note": "dataset_name, version (fingerprint[:16]), description, record_count, feature_count. Unique on (dataset_name, version)."}
+          ]
+        },
+        {
+          "id": "db.schema", "name": "db/init_db.sql + migrations/", "layer": "db", "path": "src/gonzo_pit_strategy/db/",
+          "role": "the SQL that Provisioning drives",
+          "purpose": "init_db.sql is a template with quoted-placeholder substitution: it creates the database, the schema, the App Role, and the grants, including CREATE ON DATABASE so dbt can make its own schemas. The five goose migrations create the ledger tables, the 18 Jolpica tables, and the ADR 0002 changes.",
+          "expects": "rendering by render_init_sql; goose with the schema-qualified version table",
+          "produces": "f1db.* and f1db.goose_db_version",
+          "symbols": [
+            {"name": "001_schema_and_core_tables", "sig": "up/down", "note": "application_logs (since dropped), dataset_versions, model_metadata, training_runs, training_metrics."},
+            {"name": "002_jolpica_setup", "sig": "up/down", "note": "The 18 Jolpica tables, in the same foreign-key order the Load Plan follows."},
+            {"name": "003_artifact_and_run_links", "sig": "up/down", "note": "Adds model_metadata.artifact_path and drops NOT NULL from training_runs.model_id. Its Down restores NOT NULL and fails if any run row has a NULL model_id, which is every run that started but never completed."},
+            {"name": "004_drop_unused_schema", "sig": "up/down", "note": "Drops application_logs and three columns nothing writes. Destructive by design; IF EXISTS throughout."},
+            {"name": "005_reassert_artifact_and_run_links", "sig": "up only", "note": "Two files once claimed version 3, and goose tracks by version number, so a database that saw the deleted one silently skipped the kept one and training failed on its first write. This re-applies 003 idempotently. Down is deliberately SELECT 1."}
+          ],
+          "notes": ["Migrations are reversible on an empty database: down through all of them and back up applies cleanly, so a scratch database can be reset without recreating it."]
+        },
+
+        {
+          "id": "ext.csv", "name": "data/raw/*.csv", "layer": "ext", "kind": "external",
+          "role": "the Jolpica export, 18 files",
+          "purpose": "One CSV per Jolpica table. The Load Plan names every file; a directory missing any of them fails the Load. A dated copy lives in data/jolpica-f1-csv-2026-01/.",
+          "expects": "-", "produces": "rows for COPY"
+        },
+        {
+          "id": "ext.f1db", "name": "Postgres f1db.*", "layer": "ext", "kind": "external",
+          "role": "raw tables plus the ledger tables, one database",
+          "purpose": "PostgreSQL 17 on Debian/glibc, in dev and prod both. The 18 Jolpica tables that Provisioning fills, the four ledger tables the Run Ledger writes, and goose_db_version. Two roles: the Admin Role that creates and migrates, the App Role that owns data and runs dbt and training.",
+          "expects": "-", "produces": "-",
+          "notes": ["Version and libc must match between any two databases whose fingerprints you intend to compare. Never substitute an Alpine image."]
+        },
+        {
+          "id": "ext.mlprep", "name": "f1db_ml_prep.prep_training_dataset", "layer": "ext", "kind": "external",
+          "role": "what training reads",
+          "purpose": "The dbt output table: 25,873 rows by 408 columns, scaled numerics plus three one-hot families, target finish_position. Contains object-dtype columns (all-NULL numerics) and boolean one-hot columns, which is exactly what prepare_features exists for. Rebuilt from scratch on every dbt build.",
+          "expects": "-", "produces": "a RawDataset"
+        },
+        {
+          "id": "ext.artifacts", "name": "models/artifacts/<version>/", "layer": "ext", "kind": "external",
+          "role": "the Artifacts",
+          "purpose": "Each published version contains model.keras and manifest.json. ArtifactStore makes the pair available together and never replaces an occupied version. A failed mirror write or process death after publication does not invalidate the Artifact. Its directory remains the source of truth for inference.",
+          "expects": "-", "produces": "-"
+        },
+        {
+          "id": "ext.staging", "name": "models/artifacts/.gonzo-stage-*/", "layer": "ext", "kind": "external",
+          "role": "private unpublished files, one directory per save",
+          "purpose": "ArtifactStore writes both files here before atomic publication. Staging shares the destination filesystem. Catchable failures remove this save's staging directory. SIGKILL can leave it behind, but loaders reject the reserved namespace and aliases into it. No automatic stale-staging cleanup runs.",
+          "expects": "an evaluated model and its Artifact Manifest", "produces": "a complete pair ready for publication"
+        },
+        {
+          "id": "ext.experiments", "name": "config/experiments/*.json", "layer": "ext", "kind": "external",
+          "role": "training configs and sweep grids",
+          "purpose": "training_config_default.json is a full TrainingConfig; sweep_params.json and dense_sweep.json are grids of dotted keys to value lists. --generate-default writes the template here.",
+          "expects": "-", "produces": "-"
+        },
+        {
+          "id": "ext.tensorboard", "name": "logs/tensorboard/<version>/", "layer": "ext", "kind": "external",
+          "role": "per-epoch curves",
+          "purpose": "Written by the Keras TensorBoard callback during fit. Not part of the Artifact and not needed for inference.",
+          "expects": "-", "produces": "-"
+        },
+        {
+          "id": "ext.vault", "name": "HashiCorp Vault", "layer": "ext", "kind": "external",
+          "role": "optional password source",
+          "purpose": "Reached only through Multipass, only when VAULT__ADDR, VAULT__ROLE_ID and VAULT__SECRET_ID are all set. Supplies DatabaseConfig.password from <mount_point>/password. Unverified against prod as of the E2E doc.",
+          "expects": "AppRole credentials", "produces": "secret data"
+        },
+        {
+          "id": "ext.goose", "name": "goose", "layer": "ext", "kind": "external",
+          "role": "the migration runner, a Go binary on PATH",
+          "purpose": "Invoked by the Migrate phase as a subprocess with -table f1db.goose_db_version. Tracks applied migrations by version number, not filename, which is the whole story behind migration 005.",
+          "expects": "a libpq URL for the Admin Role", "produces": "applied migrations"
+        },
+        {
+          "id": "ext.psql", "name": "psql", "layer": "ext", "kind": "external",
+          "role": "runs the rendered init script",
+          "purpose": "Kept for one reason: init_db.sql uses \\c to reconnect to the database it just created, and that is a client feature. Run without ON_ERROR_STOP on purpose, so an 'already exists' failure still lets the grants apply.",
+          "expects": "PGPASSWORD in the environment, the Admin Role", "produces": "-"
+        }
+      ],
+      "edges": [
+        ["cli.load", "config"], ["cli.load", "db.provisioning"],
+        ["cli.train", "training.config"], ["cli.train", "training.runner"], ["cli.train", "training.sweep"],
+        ["cli.train", "training.data"], ["cli.train", "training.artifact"], ["cli.train", "config"],
+        ["cli.train", "db.pool"], ["cli.train", "db.run_ledger"], ["cli.train", "ext.experiments"],
+
+        ["training.runner", "training.config"], ["training.runner", "training.data"], ["training.runner", "training.model_factory"],
+        ["training.runner", "training.callbacks"], ["training.runner", "training.artifact"], ["training.runner", "training.ledger"],
+        ["training.runner", "config"], ["training.runner", "ext.tensorboard"],
+        ["training.sweep", "training.config"], ["training.sweep", "training.runner"], ["training.sweep", "training.data"],
+        ["training.sweep", "training.artifact"], ["training.sweep", "training.ledger"], ["training.sweep", "config"],
+        ["db.provisioning", "db.schema"], ["db.provisioning", "ext.goose"], ["db.provisioning", "ext.psql"],
+        ["db.provisioning", "ext.csv"], ["db.provisioning", "ext.f1db"],
+
+        ["training.data", "training.config"], ["training.data", "ext.mlprep"],
+        ["training.ledger", "training.artifact"], ["training.ledger", "training.config"], ["training.ledger", "training.data"],
+        ["training.artifact", "ext.artifacts"], ["training.artifact", "ext.staging"],
+
+        ["db.run_ledger", "db.base"], ["db.run_ledger", "db.pool"], ["db.run_ledger", "db.models"],
+        ["db.run_ledger", "training.artifact"], ["db.run_ledger", "training.config"], ["db.run_ledger", "training.data"], ["db.run_ledger", "training.ledger"],
+        ["tests.fakes", "training.artifact"], ["tests.fakes", "training.config"], ["tests.fakes", "training.data"], ["tests.fakes", "training.ledger"],
+        ["tests.conftest", "tests.fakes"], ["tests.conftest", "db.pool"], ["tests.conftest", "db.base"], ["tests.conftest", "config"],
+
+        ["training.model_factory", "training.config"],
+        ["training.callbacks", "training.ledger"],
+        ["inference.predictor", "config"], ["inference.predictor", "training.artifact"], ["inference.predictor", "training.data"],
+
+        ["config", "vault"], ["config", "training.config"],
+        ["vault", "ext.vault"],
+
+        ["db.pool", "config"], ["db.pool", "ext.f1db"],
+        ["db.base", "db.pool"],
+        ["db.models", "db.base"],
+
+        ["ext.dbt", "ext.f1db"], ["ext.dbt", "ext.mlprep"]
+      ]
+    },
+
+    "lineage": {
+      "label": "dbt lineage",
+      "out_label": "Feeds",
+      "in_label": "Built from",
+      "layers": [
+        {"id": "src",   "label": "Sources: f1db.* (11 of the 18 Jolpica tables)"},
+        {"id": "stg",   "label": "Staging: f1db_staging, views"},
+        {"id": "int",   "label": "Intermediate: f1db_intermediate, view"},
+        {"id": "feat",  "label": "Features: f1db_features, views, dataset-level feature engineering (ADR 0003)"},
+        {"id": "prep",  "label": "ML prep: f1db_ml_prep, tables"},
+        {"id": "py",    "label": "Consumer"},
+        {"id": "macro", "label": "Macros: dbt/macros/, 42 lines of SQL in total"}
+      ],
+      "nodes": [
+        {"id": "dbt.src.session_entries", "name": "session_entries", "layer": "src", "kind": "external", "small": true, "role": "results per session", "purpose": "One row per driver per session: grid, position, status, laps, points, time, fastest_lap_rank. About 48k rows.", "path": "f1db.session_entries"},
+        {"id": "dbt.src.sessions", "name": "sessions", "layer": "src", "kind": "external", "small": true, "role": "R, Q1, Q2, Q3, QB, practice", "purpose": "Session metadata. Every staging model filters on s.type, R for races and Q1/Q2/Q3/QB for qualifying.", "path": "f1db.sessions"},
+        {"id": "dbt.src.rounds", "name": "rounds", "layer": "src", "kind": "external", "small": true, "role": "Grand Prix weekends", "purpose": "date, number, circuit_id, is_cancelled. Cancelled rounds are excluded in staging.", "path": "f1db.rounds"},
+        {"id": "dbt.src.seasons", "name": "seasons", "layer": "src", "kind": "external", "small": true, "role": "year", "purpose": "Season year, joined onto every race result.", "path": "f1db.seasons"},
+        {"id": "dbt.src.circuits", "name": "circuits", "layer": "src", "kind": "external", "small": true, "role": "circuit name", "purpose": "Supplies circuit_name, which becomes a one-hot family in ml_prep. Its sort order under the server's collation is baked into the dataset's column order.", "path": "f1db.circuits"},
+        {"id": "dbt.src.round_entries", "name": "round_entries", "layer": "src", "kind": "external", "small": true, "role": "driver entries per round", "purpose": "The key qualifying is pivoted on. About 27k rows.", "path": "f1db.round_entries"},
+        {"id": "dbt.src.team_drivers", "name": "team_drivers", "layer": "src", "kind": "external", "small": true, "role": "driver to team per season", "purpose": "Links a round entry to its driver and team.", "path": "f1db.team_drivers"},
+        {"id": "dbt.src.drivers", "name": "drivers", "layer": "src", "kind": "external", "small": true, "role": "abbreviation", "purpose": "Supplies driver_abbreviation, the third one-hot family.", "path": "f1db.drivers"},
+        {"id": "dbt.src.teams", "name": "teams", "layer": "src", "kind": "external", "small": true, "role": "team name", "purpose": "Supplies team_name, the second one-hot family.", "path": "f1db.teams"},
+        {"id": "dbt.src.driver_championships", "name": "driver_championships", "layer": "src", "kind": "external", "small": true, "role": "standings per session", "purpose": "points, position, win_count per driver per session; staging keeps the race session's last entry per round.", "path": "f1db.driver_championships"},
+        {"id": "dbt.src.team_championships", "name": "team_championships", "layer": "src", "kind": "external", "small": true, "role": "standings per session", "purpose": "Same shape as driver_championships, per team.", "path": "f1db.team_championships"},
+
+        {"id": "dbt.stg_race_results", "name": "stg_race_results", "layer": "stg", "path": "dbt/models/staging/stg_race_results.sql", "where": "view in f1db_staging",
+         "role": "race session results with driver, team, circuit and season",
+         "purpose": "Nine-table join filtered to s.type = 'R' and r.is_cancelled = false. Produces round_id, circuit, season_year, round_number, team, driver, round_entry_id, grid, finish_position, status, laps_completed, points, time, fastest_lap_rank. Ports the race_results CTE from the old Python repository.",
+         "notes": ["Tests: round_id, driver_id, grid and season_year not_null."]},
+        {"id": "dbt.stg_qualifying", "name": "stg_qualifying", "layer": "stg", "path": "dbt/models/staging/stg_qualifying.sql", "where": "view in f1db_staging",
+         "role": "Q1/Q2/Q3 times pivoted per round entry",
+         "purpose": "GROUP BY round_entry_id with MAX(CASE WHEN s.type = ...) for each of Q1, Q2, Q3, and qualifying_position as the first non-null of the Q3, Q2, Q1, QB positions.",
+         "notes": ["Tests: round_entry_id unique and not_null."]},
+        {"id": "dbt.stg_driver_standings", "name": "stg_driver_standings", "layer": "stg", "path": "dbt/models/staging/stg_driver_standings.sql", "where": "view in f1db_staging",
+         "role": "driver championship after each race",
+         "purpose": "DISTINCT ON (round_id, driver_id) ordered by session_number DESC over race sessions, so one standings row per driver per round: points, position, wins."},
+        {"id": "dbt.stg_team_standings", "name": "stg_team_standings", "layer": "stg", "path": "dbt/models/staging/stg_team_standings.sql", "where": "view in f1db_staging",
+         "role": "team championship after each race",
+         "purpose": "The same DISTINCT ON shape as the driver standings, keyed on (round_id, team_id)."},
+
+        {"id": "dbt.int_race_history", "name": "int_race_history", "layer": "int", "path": "dbt/models/intermediate/int_race_history.sql", "where": "view in f1db_intermediate",
+         "role": "the four staging models joined, nulls filled, types cast",
+         "purpose": "LEFT JOINs qualifying on round_entry_id and both standings on (round_id, driver_id or team_id). Missing qualifying times become '0:00.000' and a missing qualifying position becomes 50; points and standings are cast to numeric. Replaces the NullValueCleaner and DataTypeConverter steps of the old pandas pipeline."},
+
+        {"id": "dbt.feat_time_converted", "name": "feat_time_converted", "layer": "feat", "path": "dbt/models/features/feat_time_converted.sql", "where": "view in f1db_features",
+         "role": "time strings to seconds and milliseconds",
+         "purpose": "q1_seconds, q2_seconds, q3_seconds through convert_lap_time_to_seconds, a q*_time_missing flag for each '0:00.000', and race_time_ms through convert_race_time_to_ms."},
+        {"id": "dbt.feat_dnf_handled", "name": "feat_dnf_handled", "layer": "feat", "path": "dbt/models/features/feat_dnf_handled.sql", "where": "view in f1db_features",
+         "role": "is_dnf flag, finish_position filled with 25",
+         "purpose": "A NULL finish_position means did not finish: is_dnf = 1 and finish_position_filled = 25. This is the input to feat_lagged, so its (season_year, driver_id, round_number) combination must be unique for the lagged features to be deterministic.",
+         "notes": ["A warn-severity dbt_utils.unique_combination_of_columns test tracks that uniqueness. It reports WARN 83 today: 83 groups in seasons 1950 to 1964 where a driver was entered more than once in a round. When it goes to PASS the fingerprint becomes a usable baseline."]},
+        {"id": "dbt.feat_lagged", "name": "feat_lagged", "layer": "feat", "path": "dbt/models/features/feat_lagged.sql", "where": "view in f1db_features",
+         "role": "previous-race values per driver per season",
+         "purpose": "Eight prev_race_* columns via LAG(..., 1) OVER (PARTITION BY season_year, driver_id ORDER BY round_number), COALESCEd to 0 for the first round.",
+         "notes": ["Known limitation, accepted rather than fixed: the window key is not unique for 172 rows in 1950 to 1964 (shared drives), and SQL does not define which tied row LAG returns. Through prep_scaled's AVG/STDDEV_POP OVER() those rows perturb all 25,873 rows of prev_race_points_scaled, prev_race_team_wins_scaled and prev_race_race_time_ms_scaled. Filtering to seasons >= 2008 removes every tied group."]},
+        {"id": "dbt.feat_season_progress", "name": "feat_season_progress", "layer": "feat", "path": "dbt/models/features/feat_season_progress.sql", "where": "view in f1db_features",
+         "role": "fraction of the season elapsed",
+         "purpose": "round_number divided by MAX(round_number) OVER (PARTITION BY season_year)."},
+        {"id": "dbt.feat_clipped", "name": "feat_clipped", "layer": "feat", "path": "dbt/models/features/feat_clipped.sql", "where": "view in f1db_features",
+         "role": "z-score clip at 3 standard deviations",
+         "purpose": "Passes most columns through and clips qualifying_position, grid, race_time_ms (as race_time_ms_clipped), points, driver_championship_points and team_championship_points with z_score_clip. finish_position_filled is renamed to finish_position here, so from this point on the target column carries the DNF fill."},
+
+        {"id": "dbt.prep_feature_set", "name": "prep_feature_set", "layer": "prep", "path": "dbt/models/ml_prep/prep_feature_set.sql", "where": "table in f1db_ml_prep",
+         "role": "select the training-relevant columns",
+         "purpose": "Drops ids, dates, URLs and raw strings. Keeps three categoricals (circuit_name, team_name, driver_abbreviation), 21 numerics to be scaled, five already-numeric flags and season_progress_percent, and the target finish_position."},
+        {"id": "dbt.prep_scaled", "name": "prep_scaled", "layer": "prep", "path": "dbt/models/ml_prep/prep_scaled.sql", "where": "table in f1db_ml_prep",
+         "role": "standardize the 21 numerics",
+         "purpose": "(x - AVG(x) OVER()) / NULLIF(STDDEV_POP(x) OVER(), 0) for each numeric column, producing *_scaled columns. The population statistics come from the whole table, which is why an ambiguity in 172 rows of feat_lagged reaches every row here."},
+        {"id": "dbt.prep_scaling_params", "name": "prep_scaling_params", "layer": "prep", "path": "dbt/models/ml_prep/prep_scaling_params.sql", "where": "table in f1db_ml_prep",
+         "role": "the fitted scaler: mean and stddev per column",
+         "purpose": "One row per scaled column with its mean and population stddev, so inference on new raw rows could rescale the same way. Nothing in Python reads it yet: the predictor consumes rows that are already scaled.",
+         "notes": ["Tests: column_name unique and not_null, mean_val and stddev_val not_null."]},
+        {"id": "dbt.prep_category_mappings", "name": "prep_category_mappings", "layer": "prep", "path": "dbt/models/ml_prep/prep_category_mappings.sql", "where": "table in f1db_ml_prep",
+         "role": "the fitted encoder: distinct categories per feature",
+         "purpose": "Every distinct circuit_name, team_name and driver_abbreviation, ordered. The same reason prep_scaling_params exists; also unread by Python today."},
+        {"id": "dbt.prep_ohe_circuit", "name": "prep_ohe_circuit", "layer": "prep", "path": "dbt/models/ml_prep/prep_ohe_circuit.sql", "where": "table in f1db_ml_prep",
+         "role": "one-hot circuit_name (1 of 3)",
+         "purpose": "A compile-time run_query('SELECT DISTINCT circuit_name ... ORDER BY circuit_name') drives a Jinja loop that emits one CASE WHEN column per circuit, named circuit_<clean_column_name>. Passes every other column through explicitly and drops circuit_name.",
+         "notes": ["That ORDER BY is what makes the dataset's column order collation-dependent: nürburgring and österreichring sort differently under glibc and musl. Running the identical build on Alpine once shifted 123 of 408 columns."]},
+        {"id": "dbt.prep_ohe_team", "name": "prep_ohe_team", "layer": "prep", "path": "dbt/models/ml_prep/prep_ohe_team.sql", "where": "table in f1db_ml_prep",
+         "role": "one-hot team_name (2 of 3)",
+         "purpose": "Same pattern as the circuit model, using dbt_utils.star(except team_name) to pass the rest through."},
+        {"id": "dbt.prep_ohe_driver", "name": "prep_ohe_driver", "layer": "prep", "path": "dbt/models/ml_prep/prep_ohe_driver.sql", "where": "table in f1db_ml_prep",
+         "role": "one-hot driver_abbreviation (3 of 3)",
+         "purpose": "Same pattern again, the last categorical. After this every column is numeric or boolean."},
+        {"id": "dbt.prep_training_dataset", "name": "prep_training_dataset", "layer": "prep", "path": "dbt/models/ml_prep/prep_training_dataset.sql", "where": "table in f1db_ml_prep",
+         "role": "SELECT * FROM prep_ohe_driver: the table training reads",
+         "purpose": "The final materialization. 25,873 rows by 408 columns as of the 2026-01 export. The one-hot columns arrive in pandas as bool and the all-NULL numerics as object, which prepare_features converts on both the training and the inference path.",
+         "notes": ["Tests: finish_position not_null and in [1, 40].", "dbt build reports PASS=36 WARN=1 ERROR=0 on a good run; the one warning is the feat_dnf_handled uniqueness test."]},
+
+        {"id": "dbt.py.data_source", "name": "DatabaseDataSource", "layer": "py", "goto": "training.data", "path": "src/gonzo_pit_strategy/training/data.py",
+         "role": "SELECT * FROM f1db_ml_prep.prep_training_dataset",
+         "purpose": "Where the dbt lineage hands over to Python. Everything above this line defines the dataset and is covered by the Dataset Fingerprint; everything below it is model-level encoding that inference must repeat. That is the seam ADR 0003 draws: not SQL versus Python, but does the predictor have to do this too? Click through to the module."},
+
+        {"id": "dbt.macro.lap", "name": "convert_lap_time_to_seconds", "layer": "macro", "small": true, "path": "dbt/macros/convert_lap_time_to_seconds.sql", "role": "M:SS.fff to seconds", "purpose": "Regex-guarded SPLIT_PART arithmetic; NULL, '0:00.000' and anything unparseable become 0.0."},
+        {"id": "dbt.macro.race", "name": "convert_race_time_to_ms", "layer": "macro", "small": true, "path": "dbt/macros/convert_race_time_to_ms.sql", "role": "H:MM:SS.fff, M:SS.fff or bare seconds to ms", "purpose": "Three regex branches for the three formats Jolpica uses; the rest become 0.0."},
+        {"id": "dbt.macro.clip", "name": "z_score_clip", "layer": "macro", "small": true, "path": "dbt/macros/z_score_clip.sql", "role": "clip at mean +/- 3 stddev", "purpose": "Uses AVG and STDDEV OVER() inline. A zero stddev passes the value through untouched."},
+        {"id": "dbt.macro.clean", "name": "clean_column_name", "layer": "macro", "small": true, "path": "dbt/macros/clean_column_name.sql", "role": "a category value to a column suffix", "purpose": "Lower-cases and strips or replaces spaces, ampersands, punctuation and slashes so a circuit or team name can be a SQL identifier."}
+      ],
+      "edges": [
+        ["dbt.src.session_entries", "dbt.stg_race_results"], ["dbt.src.sessions", "dbt.stg_race_results"], ["dbt.src.rounds", "dbt.stg_race_results"],
+        ["dbt.src.seasons", "dbt.stg_race_results"], ["dbt.src.circuits", "dbt.stg_race_results"], ["dbt.src.round_entries", "dbt.stg_race_results"],
+        ["dbt.src.team_drivers", "dbt.stg_race_results"], ["dbt.src.drivers", "dbt.stg_race_results"], ["dbt.src.teams", "dbt.stg_race_results"],
+        ["dbt.src.session_entries", "dbt.stg_qualifying"], ["dbt.src.sessions", "dbt.stg_qualifying"], ["dbt.src.round_entries", "dbt.stg_qualifying"],
+        ["dbt.src.driver_championships", "dbt.stg_driver_standings"], ["dbt.src.sessions", "dbt.stg_driver_standings"],
+        ["dbt.src.team_championships", "dbt.stg_team_standings"], ["dbt.src.sessions", "dbt.stg_team_standings"],
+
+        ["dbt.stg_race_results", "dbt.int_race_history"], ["dbt.stg_qualifying", "dbt.int_race_history"],
+        ["dbt.stg_driver_standings", "dbt.int_race_history"], ["dbt.stg_team_standings", "dbt.int_race_history"],
+
+        ["dbt.int_race_history", "dbt.feat_time_converted"],
+        ["dbt.feat_time_converted", "dbt.feat_dnf_handled"],
+        ["dbt.feat_dnf_handled", "dbt.feat_lagged"],
+        ["dbt.feat_lagged", "dbt.feat_season_progress"],
+        ["dbt.feat_season_progress", "dbt.feat_clipped"],
+
+        ["dbt.feat_clipped", "dbt.prep_feature_set"],
+        ["dbt.prep_feature_set", "dbt.prep_scaled"], ["dbt.prep_feature_set", "dbt.prep_scaling_params"], ["dbt.prep_feature_set", "dbt.prep_category_mappings"],
+        ["dbt.prep_scaled", "dbt.prep_ohe_circuit"],
+        ["dbt.prep_ohe_circuit", "dbt.prep_ohe_team"],
+        ["dbt.prep_ohe_team", "dbt.prep_ohe_driver"],
+        ["dbt.prep_ohe_driver", "dbt.prep_training_dataset"],
+        ["dbt.prep_training_dataset", "dbt.py.data_source"],
+
+        ["dbt.macro.lap", "dbt.feat_time_converted"], ["dbt.macro.race", "dbt.feat_time_converted"],
+        ["dbt.macro.clip", "dbt.feat_clipped"],
+        ["dbt.macro.clean", "dbt.prep_ohe_circuit"], ["dbt.macro.clean", "dbt.prep_ohe_team"], ["dbt.macro.clean", "dbt.prep_ohe_driver"]
+      ]
+    }
+  },
+
+  "flows": [
+    {
+      "id": "provision", "label": "1. Provision (gonzo-load)",
+      "intro": "Provisioning validates the requested selection and required credential fields before starting. Each selected phase runs once, in Init, Migrate, Load order. File checks happen when their phase starts. The CLI supplies arguments and prints results. AppConfig supplies logging settings, not Provisioning credentials. Each tag names the executing role.",
+      "writes_label": "Produces",
+      "steps": [
+        {"step": "0", "label": "Translate command-line arguments", "module": "cli.load", "calls": ["db.provisioning"], "tag": "no database",
+          "writes": ["DatabaseTarget and roles", "selected Steps from parse_steps"],
+          "note": "The CLI builds the target and roles and passes --steps to the module's parser. The default is all. Empty selections and unknown names, including all,unknown, raise ProvisioningError. The CLI logs the message and exits 1."},
+        {"step": "1", "label": "Validate the requested operation", "module": "db.provisioning", "calls": [], "tag": "no database",
+          "writes": ["each selected Step once, in execution order"],
+          "note": "Provisioner.provision validates and orders direct requests too. Shared role rules check the entire selection before any phase starts: Init needs both roles, Migrate only Admin Role, and Load only App Role. Missing fields or a missing Load directory argument fail here. File checks remain phase-local."},
+        {"step": "2", "label": "Init", "module": "db.provisioning", "calls": ["db.schema", "ext.psql"], "tag": "admin role", "tagclass": "role-admin",
+         "writes": ["the database", "the f1db schema", "the App Role, with USAGE and ALL on the schema, CONNECT and CREATE on the database, and default privileges on future tables and sequences"],
+         "note": "render_init_sql fills the template with already-quoted SQL and psql runs it as the Admin Role against the `postgres` database. Without ON_ERROR_STOP on purpose: 'already exists' is tolerated so a re-run still applies the grants. CREATE ON DATABASE is the grant dbt needs to make its own schemas; without it the first dbt build fails with permission denied for database f1db."},
+        {"step": "3", "label": "Migrate", "module": "db.provisioning", "calls": ["ext.goose", "db.schema"], "tag": "admin role", "tagclass": "role-admin",
+         "writes": ["f1db.goose_db_version", "the four ledger tables", "the 18 Jolpica tables", "artifact_path and a nullable training_runs.model_id"],
+         "note": "goose up with -table f1db.goose_db_version. Check afterwards that training_runs.model_id is nullable; goose tracks by version number and a database that saw the other version 3 once skipped the real one while reporting success. Migration 005 repairs that idempotently."},
+        {"step": "4", "label": "Load", "module": "db.provisioning", "calls": ["ext.csv", "ext.f1db"], "tag": "app role", "tagclass": "role-app",
+         "writes": ["f1db.* rows, in foreign-key order, in one transaction", "a LoadReport of rows per table"],
+         "note": "resolve_load_plan refuses a directory missing any of the 18 files. Then COPY FROM STDIN per table through psycopg2, so a failure raises instead of exiting 0, and the whole plan rolls back. Skip this phase against a snapshot: it is a bare COPY with no ON CONFLICT."},
+        {"step": "5", "label": "Print the report", "module": "cli.load", "calls": [], "tag": "",
+         "writes": ["rows per table and a total on stdout", "exit 0"],
+         "note": "A correct load is about 665k laps, 48k session_entries and 27k round_entries. All-zero counts with a success message was a real failure mode; the row counts are the check that means something."}
+      ]
+    },
+    {
+      "id": "dbt", "label": "2. Build the dataset (dbt build)",
+      "intro": "Raw f1db.* to f1db_ml_prep.prep_training_dataset. A separate program with a separate credential path: dbt/profiles.yml reads F1DB_HOST, F1DB_USER and F1DB_PASSWORD and never sees AppConfig. The dbt lineage tab draws every model; this is the shape of one run.",
+      "writes_label": "Materializes",
+      "steps": [
+        {"step": "0", "label": "Authenticate through profiles.yml", "module": "ext.dbt", "calls": [], "tag": "F1DB_* env", "tagclass": "role-app",
+         "writes": [],
+         "note": "Export the three variables and DBT_PROFILES_DIR, run dbt deps, then dbt build. Port and dbname are hardcoded in the profile. The user is the App Role, which is why Init grants it CREATE ON DATABASE."},
+        {"step": "1", "label": "Staging", "module": "dbt.stg_race_results", "calls": ["dbt.stg_qualifying", "dbt.stg_driver_standings", "dbt.stg_team_standings"], "tag": "views",
+         "writes": ["f1db_staging.*"],
+         "note": "Four views over the source tables: race results, pivoted qualifying, and the driver and team standings after each race. Views, so every layer stays queryable for inspection after the run."},
+        {"step": "2", "label": "Intermediate", "module": "dbt.int_race_history", "calls": [], "tag": "view",
+         "writes": ["f1db_intermediate.int_race_history"],
+         "note": "The join, the null fills and the numeric casts that the old pandas pipeline did in its first two steps."},
+        {"step": "3", "label": "Features", "module": "dbt.feat_time_converted", "calls": ["dbt.feat_dnf_handled", "dbt.feat_lagged", "dbt.feat_season_progress", "dbt.feat_clipped"], "tag": "views",
+         "writes": ["f1db_features.*"],
+         "note": "Time conversion, DNF handling, lagging, season progress, clipping. Dataset-level feature engineering lives here by decision (ADR 0003): inference never repeats it, it receives rows that already have it."},
+        {"step": "4", "label": "ML prep", "module": "dbt.prep_feature_set", "calls": ["dbt.prep_scaled", "dbt.prep_ohe_circuit", "dbt.prep_ohe_team", "dbt.prep_ohe_driver", "dbt.prep_training_dataset"], "tag": "tables",
+         "writes": ["f1db_ml_prep.prep_training_dataset, 25,873 x 408", "prep_scaling_params", "prep_category_mappings"],
+         "note": "Column selection, standardization, then three one-hot passes whose column lists are generated at compile time by run_query. The final table is what DatabaseDataSource reads. Everything in the four dbt schemas is dropped and recreated on every build."},
+        {"step": "5", "label": "Tests", "module": "dbt.feat_dnf_handled", "calls": ["dbt.prep_training_dataset"], "tag": "",
+         "writes": [],
+         "note": "Expect PASS=36 WARN=1 ERROR=0. The one warning is the uniqueness test on feat_dnf_handled reporting the 83 pre-1965 shared-drive groups. Any ERROR, or a different warning count, is unexpected."}
+      ]
+    },
+    {
+      "id": "train", "label": "3. Train (gonzo-train)",
+      "intro": "One Experiment, or a Sweep of them. The entry point hydrates AppConfig and wires the adapters; the Experiment is straight-line code from data to Artifact to database mirror. The tag says what each step touches. DB__* variables use a double underscore; DB_HOST matches nothing and is silently dropped.",
+      "writes_label": "Writes",
+      "steps": [
+        {"step": "0", "label": "Hydrate AppConfig", "module": "cli.train", "calls": ["config", "vault"], "tag": "config",
+         "writes": ["AppConfig: db, paths, logging, vault", "root logging configured"],
+         "note": "Precedence is kwargs, environment, .env, Vault, defaults. Vault is optional and self-disables without all three credentials; a fetch failure logs a warning and falls through. Exporting DB__HOST and friends is how a run is pointed at a scratch database without editing .env, and a typo there falls back to whatever .env says."},
+        {"step": "1", "label": "Wire the adapters", "module": "cli.train", "calls": ["db.pool", "training.data", "training.artifact", "db.run_ledger"], "tag": "app role (DB__*)", "tagclass": "role-app",
+         "writes": ["ConnectionPool", "DatabaseDataSource", "ArtifactStore(paths.artifacts_root)", "PostgresRunLedger"],
+         "note": "The entry point builds every collaborator and injects it (ADR 0001). --generate-default returns before this step, so writing a template config needs no database."},
+        {"step": "2", "label": "Validate the TrainingConfig", "module": "cli.train", "calls": ["training.config", "training.sweep"], "tag": "no database",
+         "writes": ["one TrainingConfig, or a list of them from the grid"],
+         "note": "Pydantic validation: a typo or an out-of-range value exits 1 here. Under --grid-search a SweepConfig expands dotted keys over the base config."},
+        {"step": "3", "label": "Load and fingerprint the data", "module": "training.runner", "calls": ["training.data", "ext.mlprep"], "tag": "reads prep_training_dataset",
+         "arrow": "│  ▲ under --grid-search, steps 3 to 10 repeat once per generated config",
+         "writes": ["a RawDataset, then its Dataset Fingerprint", "LoadedData: six splits, feature_names in training order, DatasetProvenance"],
+         "note": "The fingerprint is taken on the raw frame, before prepare_features. Then object columns are coerced, booleans become ints, NaN becomes 0, the target and exclude_columns are dropped, and two train_test_split calls produce the splits with random_state."},
+        {"step": "4", "label": "Build the model", "module": "training.runner", "calls": ["training.model_factory"], "tag": "keras",
+          "writes": ["a compiled keras.Model", "model_version = <type>_<uuid4 hex>"],
+          "note": "Dense or BiLSTM from the configured model type, with Adam, mse loss, and the mae metric. A full random UUID identifies each Experiment independently of clock resolution."},
+        {"step": "5", "label": "Open the Training Run", "module": "training.runner", "calls": ["training.ledger", "db.run_ledger"], "tag": "writes f1db",
+         "writes": ["training_runs row: status RUNNING, model_id NULL, dataset_version_id NULL"],
+         "note": "`with ledger.run(config) as run:` starts here. The row exists before fit, so the run is visible while training, and everything through step 9 happens inside the block."},
+        {"step": "6", "label": "Fit", "module": "training.runner", "calls": ["training.callbacks", "ext.tensorboard"], "tag": "keras",
+         "writes": ["training_metrics rows per epoch, TRAIN and VALIDATION", "logs/tensorboard/<version>/"],
+         "note": "Callbacks: EarlyStopping on val_loss with restore_best_weights when patience > 0, console output, TensorBoard, and EpochMetricsCallback streaming each epoch to the ledger as it completes. Once fit returns, EarlyStopping has already restored the best weights into the in-memory model."},
+        {"step": "7", "label": "Evaluate", "module": "training.runner", "calls": [], "tag": "keras",
+         "writes": ["test_loss and test_metrics, as a dict"],
+         "note": "model.evaluate(return_dict=True) on the held-out split, measuring the model currently in memory, which is the one about to be saved."},
+        {"step": "8a", "label": "Write private staging", "module": "training.artifact", "calls": ["ext.staging"], "tag": "unpublished",
+          "writes": ["models/artifacts/.gonzo-stage-*/model.keras", "manifest.json with feature_names, target, config, fingerprint, epochs_completed, test_metrics"],
+          "note": "Experiment calls ArtifactStore.save with the evaluated model and its manifest. The store rejects an occupied version, then serializes both files in a private directory on the destination filesystem. Readers cannot load staging. Catchable failures clean it up; SIGKILL may leave it behind."},
+        {"step": "8b", "label": "Publish without replacement", "module": "training.artifact", "calls": ["ext.staging", "ext.artifacts"], "tag": "atomic rename",
+          "writes": ["models/artifacts/<version>/ containing the complete model and Artifact Manifest"],
+          "note": "Linux renameat2 with RENAME_NOREPLACE rejects any destination created during serialization. Exactly one competing save can publish a version. Readers see absence or a complete Artifact. Unsupported publication fails without a weaker fallback, and no database write has happened yet for the Model Metadata mirror."},
+        {"step": "9", "label": "Complete the run", "module": "training.runner", "calls": ["db.run_ledger", "ext.f1db"], "tag": "writes f1db",
+         "writes": ["model_metadata row with the manifest as JSONB and artifact_path", "dataset_versions upsert on (name, fingerprint[:16])", "TEST-split training_metrics", "training_runs: COMPLETED, model_id, dataset_version_id, end_time, epochs_completed"],
+          "note": "One transaction after Artifact publication. Unchanged data reuses the DatasetVersion row across Training Runs. A failed mirror write leaves the published Artifact intact and loadable."},
+        {"step": "10", "label": "Leave the block", "module": "training.runner", "calls": ["cli.train"], "tag": "",
+         "writes": ["an ExperimentResult", "or status FAILED, if anything above raised or complete() was never reached"],
+          "note": "The CLI logs run id, version, and test loss. A Sweep catches ordinary exceptions and continues with the next configuration after Run Ledger cleanup. SIGKILL cannot run that cleanup, so a killed process can leave a Training Run RUNNING even when its Artifact is complete."}
+      ]
+    },
+    {
+      "id": "predict", "label": "4. Predict",
+      "intro": "Zero database calls. The Artifact Manifest carries the model's input contract, and prepare_features carries its encoding, so a raw slice of prep_training_dataset predicts directly. This is the round trip that catches train/serve skew.",
+      "writes_label": "Produces",
+      "steps": [
+        {"step": "0", "label": "Locate the artifact", "module": "inference.predictor", "calls": ["config", "training.artifact"], "tag": "no database",
+         "writes": ["ArtifactStore(paths.artifacts_root)"],
+         "note": "load_predictor(version, AppConfig().paths). Only PathsConfig is needed; no pool, no ledger."},
+        {"step": "1", "label": "Rehydrate from disk", "module": "training.artifact", "calls": ["ext.artifacts"], "tag": "reads disk",
+         "writes": ["keras.Model", "ArtifactManifest: feature_names, target_column"],
+          "note": "Read the manifest, then load the model. Both paths must be outside the reserved staging namespace, including resolved symlink targets. Historical timestamp-named Artifacts still load without native publication support. Artifacts without manifests fail with the ADR 0002 compatibility message."},
+        {"step": "2", "label": "Predict", "module": "inference.predictor", "calls": ["training.data"], "tag": "",
+         "writes": ["np.ndarray of predictions"],
+         "note": "A DataFrame is checked for every feature column, reordered to feature_names, and passed through the same prepare_features training used. ValueError: Invalid dtype: object here means training and inference have diverged again."}
+      ]
+    }
+  ]
+}
+</script>
+
+<script>
+(function () {
+  var MODEL = JSON.parse(document.getElementById('model').textContent);
+  var byId = {}, out = {}, inn = {};
+  Object.keys(MODEL.graphs).forEach(function (g) {
+    var graph = MODEL.graphs[g];
+    graph.nodes.forEach(function (n) { n.graph = g; byId[n.id] = n; });
+    graph.edges.forEach(function (e) {
+      (out[e[0]] = out[e[0]] || []).push(e[1]);
+      (inn[e[1]] = inn[e[1]] || []).push(e[0]);
+    });
+  });
+
+  var stage = document.getElementById('stage');
+  var svg = document.getElementById('edges');
+  var flowEl = document.getElementById('flow');
+  var detailEl = document.getElementById('detail');
+  var subtabs = document.getElementById('subtabs');
+  var containers = {
+    modules: document.getElementById('graph-modules'),
+    lineage: document.getElementById('graph-lineage')
+  };
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var view = 'modules';
+  var selected = null;
+  var currentFlow = 0;
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function nodeButton(n) {
+    var cls = 'node' + (n.kind === 'external' ? ' ext' : '') + (n.small ? ' small' : '');
+    var b = el('button', cls);
+    b.dataset.id = n.id;
+    b.appendChild(el('span', 'nm', n.name));
+    b.appendChild(el('span', 'rl', n.role));
+    b.addEventListener('click', function () { select(n.id); });
+    b.addEventListener('mouseenter', function () { if (!selected) highlight(n.id); });
+    b.addEventListener('mouseleave', function () { if (!selected) highlight(null); });
+    return b;
+  }
+
+  // --- graph views ----------------------------------------------------------
+  Object.keys(MODEL.graphs).forEach(function (g) {
+    var graph = MODEL.graphs[g];
+    graph.layers.forEach(function (layer) {
+      var nodes = graph.nodes.filter(function (n) { return n.layer === layer.id; });
+      if (!nodes.length) return;
+      var wrap = el('div', 'layer');
+      wrap.appendChild(el('h2', null, layer.label));
+      var row = el('div', 'row');
+      nodes.forEach(function (n) { row.appendChild(nodeButton(n)); });
+      wrap.appendChild(row);
+      containers[g].appendChild(wrap);
+    });
+  });
+
+  // --- flows ----------------------------------------------------------------
+  MODEL.flows.forEach(function (f, i) {
+    var b = el('button', null, f.label);
+    b.setAttribute('role', 'tab');
+    b.dataset.flow = String(i);
+    b.addEventListener('click', function () { showFlow(i); selectStep(i, 0); });
+    subtabs.appendChild(b);
+  });
+
+  function renderFlow(fi) {
+    var flow = MODEL.flows[fi];
+    flowEl.textContent = '';
+    flowEl.appendChild(el('p', 'intro', flow.intro));
+    flow.steps.forEach(function (s, i) {
+      if (i) flowEl.appendChild(el('div', 'arrow', s.arrow || '│'));
+      var row = el('div', 'step');
+      row.appendChild(el('div', 'no', s.step));
+      var b = el('button', 'node');
+      b.dataset.step = String(i);
+      var nm = el('span', 'nm', s.label);
+      if (s.tag) nm.appendChild(el('span', 'tag' + (s.tagclass ? ' ' + s.tagclass : ''), s.tag));
+      b.appendChild(nm);
+      var chain = [s.module].concat(s.calls).map(function (id) { return byId[id] ? byId[id].name : id; });
+      b.appendChild(el('span', 'rl', chain.join(' → ')));
+      b.addEventListener('click', function () { selectStep(fi, i); });
+      row.appendChild(b);
+      flowEl.appendChild(row);
+    });
+  }
+
+  function showFlow(fi) {
+    currentFlow = fi;
+    Array.prototype.forEach.call(subtabs.children, function (b) {
+      b.setAttribute('aria-selected', String(b.dataset.flow === String(fi)));
+    });
+    renderFlow(fi);
+  }
+
+  // --- edges ----------------------------------------------------------------
+  var paths = [];
+  function clearEdges() { paths.forEach(function (p) { p.remove(); }); paths = []; }
+  function drawEdges() {
+    clearEdges();
+    if (!containers[view]) return;
+    var box = containers[view];
+    var base = stage.getBoundingClientRect();
+    svg.setAttribute('viewBox', '0 0 ' + stage.offsetWidth + ' ' + stage.offsetHeight);
+    svg.setAttribute('width', stage.offsetWidth);
+    svg.setAttribute('height', stage.offsetHeight);
+    MODEL.graphs[view].edges.forEach(function (e) {
+      var a = box.querySelector('[data-id="' + e[0] + '"]');
+      var b = box.querySelector('[data-id="' + e[1] + '"]');
+      if (!a || !b) return;
+      var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      var down = rb.top >= ra.bottom - 4;
+      var x1 = ra.left + ra.width / 2 - base.left;
+      var x2 = rb.left + rb.width / 2 - base.left;
+      var y1 = (down ? ra.bottom : ra.top) - base.top;
+      var y2 = (down ? rb.top : rb.bottom) - base.top;
+      var dy = Math.max(18, Math.abs(y2 - y1) / 2.4) * (down ? 1 : -1);
+      var p = document.createElementNS(SVGNS, 'path');
+      p.setAttribute('class', 'edge');
+      p.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + (y1 + dy) + ' ' + x2 + ',' + (y2 - dy) + ' ' + x2 + ',' + y2);
+      p.dataset.from = e[0];
+      p.dataset.to = e[1];
+      svg.appendChild(p);
+      paths.push(p);
+    });
+  }
+
+  function highlight(id) {
+    var related = {};
+    if (id) {
+      related[id] = true;
+      (out[id] || []).forEach(function (x) { related[x] = true; });
+      (inn[id] || []).forEach(function (x) { related[x] = true; });
+    }
+    stage.classList.toggle('faded', !!id);
+    Object.keys(containers).forEach(function (g) {
+      Array.prototype.forEach.call(containers[g].querySelectorAll('.node'), function (n) {
+        n.classList.toggle('hot', !!id && !!related[n.dataset.id] && n.dataset.id !== id);
+        n.classList.toggle('sel', n.dataset.id === id);
+      });
+    });
+    paths.forEach(function (p) {
+      p.classList.toggle('hot', !!id && (p.dataset.from === id || p.dataset.to === id));
+    });
+  }
+
+  // --- detail panel ---------------------------------------------------------
+  function chipRow(ids, clickable) {
+    var row = el('div', 'chips');
+    ids.forEach(function (id) {
+      var n = byId[id];
+      var c = el('button', 'chip' + (clickable ? '' : ' flat'), n ? n.name : id);
+      if (clickable) c.addEventListener('click', function () { select(id); });
+      else c.disabled = true;
+      row.appendChild(c);
+    });
+    return row;
+  }
+
+  function section(title, child) {
+    detailEl.appendChild(el('h4', null, title));
+    detailEl.appendChild(child);
+  }
+
+  var stacked = window.matchMedia('(max-width: 940px)');
+
+  function select(id, quiet) {
+    var n = byId[id];
+    if (!n) return;
+    if (n.goto) { select(n.goto, quiet); return; }
+    if (!quiet) {
+      selected = id;
+      if (view !== n.graph) showView(n.graph);
+      highlight(id);
+    }
+    var graph = MODEL.graphs[n.graph];
+    detailEl.textContent = '';
+    detailEl.appendChild(el('h3', null, n.name));
+    var where = n.path || 'outside the package';
+    if (n.where) where += '  ·  ' + n.where;
+    detailEl.appendChild(el('p', 'path', where));
+    detailEl.appendChild(el('p', null, n.purpose));
+
+    if (n.expects && n.expects !== '-') section('Expects', el('p', null, n.expects));
+    if (n.produces && n.produces !== '-') section('Produces', el('p', null, n.produces));
+    if (n.adapters && n.adapters.length) section('Adapters', chipRow(n.adapters, true));
+    if (out[id] && out[id].length) section(graph.out_label, chipRow(out[id], true));
+    if (inn[id] && inn[id].length) section(graph.in_label, chipRow(inn[id], true));
+
+    if (n.symbols && n.symbols.length) {
+      detailEl.appendChild(el('h4', null, 'Symbols'));
+      n.symbols.forEach(function (s) {
+        var d = el('details', 'sym');
+        var sum = el('summary');
+        sum.appendChild(document.createTextNode(s.name));
+        if (s.sig) sum.appendChild(el('span', 'sig', ' ' + s.sig));
+        d.appendChild(sum);
+        d.appendChild(el('p', null, s.note));
+        detailEl.appendChild(d);
+      });
+    }
+    if (n.notes && n.notes.length) {
+      var ul = el('ul', 'notes');
+      n.notes.forEach(function (t) { ul.appendChild(el('li', null, t)); });
+      section('Also worth knowing', ul);
+    }
+    if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+    // Only chase the panel when it is stacked underneath. Side by side it is
+    // already on screen, and scrolling would just push the diagram away.
+    if (!quiet && stacked.matches) detailEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  function selectStep(fi, si) {
+    var flow = MODEL.flows[fi];
+    var s = flow.steps[si];
+    selected = null;
+    Array.prototype.forEach.call(flowEl.querySelectorAll('.node'), function (b) {
+      b.classList.toggle('sel', b.dataset.step === String(si));
+    });
+    detailEl.textContent = '';
+    detailEl.appendChild(el('h3', null, s.step + '. ' + s.label));
+    var p = el('p', 'path', flow.label);
+    if (s.tag) p.appendChild(el('span', 'detail-tag' + (s.tagclass ? ' ' + s.tagclass : ''), s.tag));
+    detailEl.appendChild(p);
+    detailEl.appendChild(el('p', null, s.note));
+    section('Code', chipRow([s.module].concat(s.calls), true));
+    if (s.writes.length) {
+      var ul = el('ul', 'notes');
+      s.writes.forEach(function (w) { ul.appendChild(el('li', null, w)); });
+      section(flow.writes_label, ul);
+    }
+    var hash = '#flow-' + flow.id + '-' + s.step;
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+    if (stacked.matches) detailEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  // --- views ----------------------------------------------------------------
+  var tabs = {
+    modules: document.getElementById('tab-modules'),
+    flow: document.getElementById('tab-flow'),
+    lineage: document.getElementById('tab-lineage')
+  };
+
+  function showView(which) {
+    view = which;
+    Object.keys(containers).forEach(function (g) { containers[g].classList.toggle('off', g !== which); });
+    flowEl.classList.toggle('on', which === 'flow');
+    subtabs.classList.toggle('off', which !== 'flow');
+    Object.keys(tabs).forEach(function (t) { tabs[t].setAttribute('aria-selected', String(t === which)); });
+    stage.classList.remove('faded');
+    if (which === 'flow') clearEdges();
+    else drawEdges();
+  }
+
+  tabs.modules.addEventListener('click', function () {
+    showView('modules');
+    if (selected && byId[selected].graph === 'modules') select(selected);
+    else { selected = null; select('training.runner', true); }
+  });
+  tabs.lineage.addEventListener('click', function () {
+    showView('lineage');
+    if (selected && byId[selected].graph === 'lineage') select(selected);
+    else { selected = null; select('dbt.prep_training_dataset', true); }
+  });
+  tabs.flow.addEventListener('click', function () { showView('flow'); showFlow(currentFlow); selectStep(currentFlow, 0); });
+
+  window.addEventListener('resize', function () { if (view !== 'flow') drawEdges(); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && selected) { selected = null; highlight(null); }
+  });
+
+  // --- start ----------------------------------------------------------------
+  showFlow(0);
+  var start = location.hash.slice(1);
+  var m = /^flow-([a-z]+)-([0-9.]+)$/.exec(start);
+  if (m) {
+    var fi = MODEL.flows.findIndex(function (f) { return f.id === m[1]; });
+    if (fi >= 0) {
+      var si = MODEL.flows[fi].steps.findIndex(function (s) { return s.step === m[2]; });
+      showView('flow'); showFlow(fi); selectStep(fi, si >= 0 ? si : 0);
+    }
+  } else if (byId[start]) {
+    showView(byId[start].graph);
+    select(start);
+  } else {
+    drawEdges();
+    select('training.runner', true);   // open with the panel filled but nothing dimmed
+  }
+})();
+</script>
+
+</body>
+</html>
