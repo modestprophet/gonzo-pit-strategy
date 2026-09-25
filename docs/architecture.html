@@ -200,12 +200,12 @@ aside h4 {
           "role": "gonzo-train: hydrate config, wire adapters, run",
           "purpose": "The entry point owns the wiring (ADR 0001): it builds AppConfig, the ConnectionPool, the DatabaseDataSource, the ArtifactStore and the PostgresRunLedger, and injects them into an Experiment or a Sweep. Nothing downstream constructs its own collaborators, which is why tests can drive a real Experiment with a temp directory and an in-memory ledger.",
           "expects": "--config PATH (a TrainingConfig JSON), or --grid-search PATH on top of it, or --generate-default",
-          "produces": "log lines with run id, model version and test loss; a results table under --grid-search; exit 1 on an invalid config or a failed experiment",
+          "produces": "log lines with run id, model version and test loss. Under --grid-search, every outcome and its configuration, plus requested, succeeded and failed counts. Exit 1 on an invalid request or any failed Experiment, otherwise 0.",
           "symbols": [
-            {"name": "main", "sig": "() -> None", "note": "--generate-default writes TrainingConfig() to config/experiments/training_config_default.json and returns before the pool is built, so it needs no database. Otherwise: pool, adapters, then either one Experiment or a Sweep whose iterations are printed as they finish."}
+            {"name": "main", "sig": "() -> None", "note": "--generate-default writes TrainingConfig() to config/experiments/training_config_default.json and returns before the pool is built, so it needs no database. Otherwise: validate TrainingConfig and, for a grid, SweepConfig before building the pool and adapters. Run one Experiment or a Sweep, logging each outcome as it arrives and printing all Sweep outcomes and counts at the end."}
           ],
           "notes": [
-            "Invalid configuration fails before training starts: TrainingConfig(**config_dict) is a pydantic validation and a typo or an out-of-range value is a sys.exit(1) here.",
+            "TrainingConfig.model_validate(config_dict) validates the base. SweepConfig eagerly validates the entire grid. Any invalid request exits 1 before execution adapters are wired or any Experiment starts.",
             "Paths come from app_config.paths, never os.getcwd()."
           ]
         },
@@ -241,13 +241,18 @@ aside h4 {
         {
           "id": "training.sweep", "name": "training/sweep.py", "layer": "orch", "path": "src/gonzo_pit_strategy/training/sweep.py",
           "role": "Sweep: one Experiment per grid point",
-          "purpose": "Generates the cartesian product of a parameter grid over a base TrainingConfig and runs an Experiment for each, yielding as it goes. A failed iteration is yielded with its error and the sweep continues, which is exactly why the Run Ledger is a context manager: a crash inside one experiment must not leave a row stuck at RUNNING.",
-          "expects": "a SweepConfig (base config plus {dotted.key: [values]}), and the same adapters an Experiment takes",
-          "produces": "an iterator of SweepIterationResult, each carrying a result or an error",
+          "purpose": "SweepConfig validates every combination of a nested grid over one base architecture before execution. An invalid request rejects the whole Sweep. Sweep runs each validated configuration and yields its outcome. An ordinary runtime exception yields a failure and does not cancel later Experiments. The Run Ledger closes any opened Training Run on ordinary exception unwinding.",
+          "expects": "a validated SweepConfig with a base config and nested parameters, for example {\"learning_rate\": [0.01, 0.001], \"model\": {\"hidden_layers\": [[64, 32], [128, 64]], \"dropout_rate\": [0.2, 0.5]}}, plus the same adapters an Experiment takes",
+          "produces": "one SweepIterationResult per requested combination, carrying its configuration, index, total, cumulative succeeded and failed counts, and either a result or an error",
           "symbols": [
-            {"name": "SweepConfig", "sig": "BaseModel", "note": "base_config, parameters, sweep_name. Keys are dot-separated paths such as model.dropout_rate."},
-            {"name": "Sweep._generate_configs", "sig": "() -> list[TrainingConfig]", "note": "itertools.product over the values, _set_nested_value for each dotted key, adds a grid_search tag and appends the parameter description to the config's description. A combination that fails validation is logged and skipped."},
-            {"name": "Sweep.run", "sig": "() -> Iterator[SweepIterationResult]", "note": "Builds and runs an Experiment per config with the shared data source, store and ledger."}
+            {"name": "SweepConfig", "sig": "BaseModel", "note": "base_config, parameters, sweep_name. Nested grid objects follow TrainingConfig fields. Each leaf is a nonempty candidate list. Dotted keys and unknown fields are rejected. model.type belongs only in the base config and cannot appear in the grid."},
+            {"name": "SweepConfig.prepare", "sig": "() -> Self", "note": "Revalidates the base, expands the cartesian product and validates every resulting TrainingConfig during construction. Any invalid combination rejects the whole request. Tags and description are preserved unless explicitly varied by the grid."},
+            {"name": "SweepConfig.configurations", "sig": "tuple[TrainingConfig, ...]", "note": "Returns deep copies of the validated configurations. total is the number of requested combinations."},
+            {"name": "Sweep.run", "sig": "() -> Iterator[SweepIterationResult]", "note": "Builds and runs an Experiment per validated config with the shared data source, store and ledger. Yields successes and runtime errors, then continues."}
+          ],
+          "notes": [
+            "{} requests one exact base config. Empty nested objects such as {\"model\": {}} add no dimensions and make no changes. An empty candidate list is rejected.",
+            "List-valued settings use lists of lists: each inner hidden_layers list is one candidate. A candidate can itself be empty if the field permits it."
           ]
         },
         {
@@ -388,11 +393,15 @@ aside h4 {
           "role": "TrainingConfig and the polymorphic ModelConfig",
           "purpose": "Pydantic models for one training run. The model field is a discriminated union on a Literal type: dense or bilstm today. Adding an architecture is a new config class here plus a builder in model_factory. Imports nothing from the package, and it must stay that way because AppConfig embeds it.",
           "expects": "a JSON object, or nothing for the defaults",
-          "produces": "a validated TrainingConfig; out-of-range values fail before training starts",
+          "produces": "a validated TrainingConfig. TrainingConfig and both model configs reject unknown fields and invalid numeric or split values before training starts.",
           "symbols": [
             {"name": "TrainingConfig", "sig": "BaseModel", "note": "target_column (finish_position), exclude_columns, test_size, validation_size, random_state, model, batch_size, epochs, learning_rate, early_stopping_patience, tags, description."},
-            {"name": "DenseModelConfig", "sig": "type='dense'", "note": "hidden_layers, dropout_rate in [0, 1], activation, output_activation."},
-            {"name": "BiLSTMModelConfig", "sig": "type='bilstm'", "note": "lstm_units, dense_layers, dropout_rate, recurrent_dropout, activation, output_activation."}
+            {"name": "DenseModelConfig", "sig": "type='dense'", "note": "hidden_layers contains positive integers. dropout_rate is at least 0 and less than 1. activation and output_activation must resolve through Keras."},
+            {"name": "BiLSTMModelConfig", "sig": "type='bilstm'", "note": "lstm_units is a nonempty list of positive integers. dense_layers contains positive integers. dropout_rate and recurrent_dropout are at least 0 and less than 1. activation and output_activation must resolve through Keras."}
+          ],
+          "notes": [
+            "batch_size and epochs are positive integers. learning_rate is finite and greater than 0.",
+            "test_size and validation_size are each greater than 0 and less than 1. Their sum must be less than 1 to leave a training split."
           ]
         },
         {
@@ -544,7 +553,7 @@ aside h4 {
         {
           "id": "ext.experiments", "name": "config/experiments/*.json", "layer": "ext", "kind": "external",
           "role": "training configs and sweep grids",
-          "purpose": "training_config_default.json is a full TrainingConfig; sweep_params.json and dense_sweep.json are grids of dotted keys to value lists. --generate-default writes the template here.",
+          "purpose": "training_config_default.json is a full TrainingConfig with model.type in the base. sweep_params.json and dense_sweep.json use nested grid objects with candidate lists, requesting 4 and 36 Experiments respectively. --generate-default writes the template here.",
           "expects": "-", "produces": "-"
         },
         {
@@ -801,14 +810,14 @@ aside h4 {
         {"step": "0", "label": "Hydrate AppConfig", "module": "cli.train", "calls": ["config", "vault"], "tag": "config",
          "writes": ["AppConfig: db, paths, logging, vault", "root logging configured"],
          "note": "Precedence is kwargs, environment, .env, Vault, defaults. Vault is optional and self-disables without all three credentials; a fetch failure logs a warning and falls through. Exporting DB__HOST and friends is how a run is pointed at a scratch database without editing .env, and a typo there falls back to whatever .env says."},
-        {"step": "1", "label": "Wire the adapters", "module": "cli.train", "calls": ["db.pool", "training.data", "training.artifact", "db.run_ledger"], "tag": "app role (DB__*)", "tagclass": "role-app",
+        {"step": "1", "label": "Validate the requested configuration", "module": "cli.train", "calls": ["training.config", "training.sweep"], "tag": "no database",
+         "writes": ["one TrainingConfig", "for a grid, a SweepConfig containing every validated combination"],
+         "note": "TrainingConfig validates the base. For --grid-search, SweepConfig eagerly expands and validates the entire nested grid within the base architecture. Any invalid request exits 1 before wiring execution or starting any Experiment. model.type cannot appear in the grid."},
+        {"step": "2", "label": "Wire the adapters", "module": "cli.train", "calls": ["db.pool", "training.data", "training.artifact", "db.run_ledger"], "tag": "app role (DB__*)", "tagclass": "role-app",
          "writes": ["ConnectionPool", "DatabaseDataSource", "ArtifactStore(paths.artifacts_root)", "PostgresRunLedger"],
          "note": "The entry point builds every collaborator and injects it (ADR 0001). --generate-default returns before this step, so writing a template config needs no database."},
-        {"step": "2", "label": "Validate the TrainingConfig", "module": "cli.train", "calls": ["training.config", "training.sweep"], "tag": "no database",
-         "writes": ["one TrainingConfig, or a list of them from the grid"],
-         "note": "Pydantic validation: a typo or an out-of-range value exits 1 here. Under --grid-search a SweepConfig expands dotted keys over the base config."},
         {"step": "3", "label": "Load and fingerprint the data", "module": "training.runner", "calls": ["training.data", "ext.mlprep"], "tag": "reads prep_training_dataset",
-         "arrow": "│  ▲ under --grid-search, steps 3 to 10 repeat once per generated config",
+          "arrow": "│  ▲ under --grid-search, attempt steps 3 to 10 for each validated config; runtime errors yield a failure and continue with the next config",
          "writes": ["a RawDataset, then its Dataset Fingerprint", "LoadedData: six splits, feature_names in training order, DatasetProvenance"],
          "note": "The fingerprint is taken on the raw frame, before prepare_features. Then object columns are coerced, booleans become ints, NaN becomes 0, the target and exclude_columns are dropped, and two train_test_split calls produce the splits with random_state."},
         {"step": "4", "label": "Build the model", "module": "training.runner", "calls": ["training.model_factory"], "tag": "keras",
@@ -834,7 +843,10 @@ aside h4 {
           "note": "One transaction after Artifact publication. Unchanged data reuses the DatasetVersion row across Training Runs. A failed mirror write leaves the published Artifact intact and loadable."},
         {"step": "10", "label": "Leave the block", "module": "training.runner", "calls": ["cli.train"], "tag": "",
          "writes": ["an ExperimentResult", "or status FAILED, if anything above raised or complete() was never reached"],
-          "note": "The CLI logs run id, version, and test loss. A Sweep catches ordinary exceptions and continues with the next configuration after Run Ledger cleanup. SIGKILL cannot run that cleanup, so a killed process can leave a Training Run RUNNING even when its Artifact is complete."}
+           "note": "The CLI logs run id, version, and test loss. A Sweep yields ordinary runtime errors and continues with the next configuration after cleanup of any opened Training Run. SIGKILL cannot run that cleanup, so a killed process can leave a Training Run RUNNING even when its Artifact is complete."},
+        {"step": "11", "label": "Report Sweep outcomes", "module": "cli.train", "calls": [], "tag": "stdout",
+          "writes": ["every outcome and its configuration", "requested, succeeded and failed counts"],
+          "note": "After all requested Experiments finish, the CLI prints each success with its run id, model version and test loss, or each failure with its error. It exits 1 if any Experiment failed, otherwise 0."}
       ]
     },
     {

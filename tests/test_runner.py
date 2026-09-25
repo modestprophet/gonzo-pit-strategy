@@ -239,7 +239,7 @@ def test_sweep_records_one_run_per_experiment(config, raw_dataset, tmp_path):
     sweep = Sweep(
         SweepConfig(
             base_config=config,
-            parameters={"model.hidden_layers": [[4], [8]]},
+            parameters={"model": {"hidden_layers": [[4], [8]]}},
         ),
         StubDataSource(raw_dataset),
         ArtifactStore(tmp_path / "artifacts"),

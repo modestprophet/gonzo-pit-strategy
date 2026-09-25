@@ -1,61 +1,85 @@
-from typing import List, Literal, Union, Optional
-from pydantic import BaseModel, Field
+from typing import Annotated, Literal, Self
 
-# --- Model Specific Configs ---
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    model_validator,
+)
+
+
+def _validate_activation(name: str) -> str:
+    from keras import activations
+
+    activations.get(name)
+    return name
+
+
+ActivationName = Annotated[str, AfterValidator(_validate_activation)]
 
 
 class DenseModelConfig(BaseModel):
     """Configuration for Dense Neural Network models."""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["dense"] = "dense"
-    hidden_layers: List[int] = Field(
+    hidden_layers: list[PositiveInt] = Field(
         default=[64, 32], description="Units per hidden layer"
     )
-    dropout_rate: float = Field(default=0.2, ge=0.0, le=1.0)
-    activation: str = "relu"
-    output_activation: str = "linear"
+    dropout_rate: float = Field(default=0.2, ge=0.0, lt=1.0)
+    activation: ActivationName = "relu"
+    output_activation: ActivationName = "linear"
 
 
 class BiLSTMModelConfig(BaseModel):
     """Configuration for Bidirectional LSTM models."""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["bilstm"] = "bilstm"
-    lstm_units: List[int] = Field(default=[64, 32], description="Units per LSTM layer")
-    dense_layers: List[int] = Field(
+    lstm_units: list[PositiveInt] = Field(
+        default=[64, 32], min_length=1, description="Units per LSTM layer"
+    )
+    dense_layers: list[PositiveInt] = Field(
         default=[32], description="Units per dense layer after LSTM"
     )
-    dropout_rate: float = Field(default=0.2, ge=0.0, le=1.0)
-    recurrent_dropout: float = Field(default=0.2, ge=0.0, le=1.0)
-    activation: str = "relu"
-    output_activation: str = "linear"
+    dropout_rate: float = Field(default=0.2, ge=0.0, lt=1.0)
+    recurrent_dropout: float = Field(default=0.2, ge=0.0, lt=1.0)
+    activation: ActivationName = "relu"
+    output_activation: ActivationName = "linear"
 
 
-ModelConfig = Union[DenseModelConfig, BiLSTMModelConfig]
-
-# --- Main Training Config ---
+ModelConfig = DenseModelConfig | BiLSTMModelConfig
 
 
 class TrainingConfig(BaseModel):
     """Master configuration for training runs."""
 
-    # Data params
+    model_config = ConfigDict(extra="forbid")
+
     target_column: str = "finish_position"
-    exclude_columns: List[str] = Field(
+    exclude_columns: list[str] = Field(
         default_factory=list, description="Columns to exclude from training"
     )
-    test_size: float = Field(default=0.2, ge=0.0, le=1.0)
-    validation_size: float = Field(default=0.1, ge=0.0, le=1.0)
-    random_state: int = 42
+    test_size: float = Field(default=0.2, gt=0.0, lt=1.0)
+    validation_size: float = Field(default=0.1, gt=0.0, lt=1.0)
+    random_state: int = Field(default=42, ge=0, le=2**32 - 1)
 
-    # Model params (Polymorphic!)
     model: ModelConfig = Field(default_factory=DenseModelConfig)
 
-    # Training Loop params
-    batch_size: int = 32
-    epochs: int = 100
-    learning_rate: float = 0.001
+    batch_size: PositiveInt = 32
+    epochs: PositiveInt = 100
+    learning_rate: float = Field(default=0.001, gt=0.0, allow_inf_nan=False)
     early_stopping_patience: int = 10
 
-    # Logging
-    tags: List[str] = Field(default_factory=lambda: ["f1", "pit_strategy"])
-    description: Optional[str] = None
+    tags: list[str] = Field(default_factory=lambda: ["f1", "pit_strategy"])
+    description: str | None = None
+
+    @model_validator(mode="after")
+    def require_training_split(self) -> Self:
+        if self.test_size + self.validation_size >= 1:
+            raise ValueError("test_size + validation_size must be less than 1")
+        return self

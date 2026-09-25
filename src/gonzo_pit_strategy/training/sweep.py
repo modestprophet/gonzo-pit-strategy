@@ -6,29 +6,66 @@ of a base configuration and executing Experiments iteratively.
 """
 import copy
 import itertools
-from dataclasses import dataclass
-from typing import Any, Dict, Iterator, List, Optional
 import logging
+from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Any, Self
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 
-from gonzo_pit_strategy.training.config import TrainingConfig
-from gonzo_pit_strategy.training.runner import Experiment, ExperimentResult
-from gonzo_pit_strategy.training.data import TrainingDataSource
-from gonzo_pit_strategy.training.artifact import ArtifactStore
-from gonzo_pit_strategy.training.ledger import RunLedger
 from gonzo_pit_strategy.config.config import PathsConfig
+from gonzo_pit_strategy.training.artifact import ArtifactStore
+from gonzo_pit_strategy.training.config import TrainingConfig
+from gonzo_pit_strategy.training.data import TrainingDataSource
+from gonzo_pit_strategy.training.ledger import RunLedger
+from gonzo_pit_strategy.training.runner import Experiment, ExperimentResult
 
 logger = logging.getLogger(__name__)
 
 
 class SweepConfig(BaseModel):
-    """Configuration for a hyperparameter sweep."""
+    """A fully validated grid, prepared before execution dependencies are needed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     base_config: TrainingConfig
-    parameters: Dict[str, List[Any]] = Field(
-        description="Grid of parameters. Keys are dot-separated paths (e.g. 'model.learning_rate')."
-    )
+    parameters: dict[str, Any]
     sweep_name: str = "Grid Search"
+    _configurations: tuple[TrainingConfig, ...] = PrivateAttr(default=())
+
+    @model_validator(mode="after")
+    def prepare(self) -> Self:
+        base = TrainingConfig.model_validate(self.base_config.model_dump())
+        axes = _grid_axes(base, self.parameters)
+        configs = []
+        combinations = itertools.product(*(choices for _, choices in axes))
+        for index, combination in enumerate(combinations, start=1):
+            settings = copy.deepcopy(base.model_dump())
+            for (path, _), value in zip(axes, combination):
+                parent = settings
+                for key in path[:-1]:
+                    parent = parent[key]
+                parent[path[-1]] = copy.deepcopy(value)
+            try:
+                configs.append(TrainingConfig.model_validate(settings))
+            except ValidationError as exc:
+                raise ValueError(f"Combination {index} is invalid: {exc}") from exc
+        self._configurations = tuple(configs)
+        return self
+
+    @property
+    def total(self) -> int:
+        return len(self._configurations)
+
+    @property
+    def configurations(self) -> tuple[TrainingConfig, ...]:
+        return tuple(config.model_copy(deep=True) for config in self._configurations)
 
 
 @dataclass
@@ -36,18 +73,41 @@ class SweepIterationResult:
     config: TrainingConfig
     index: int
     total: int
-    result: Optional[ExperimentResult] = None
-    error: Optional[Exception] = None
+    failed: int
+    result: ExperimentResult | None = None
+    error: Exception | None = None
+
+    @property
+    def succeeded(self) -> int:
+        return self.index - self.failed
 
 
-def _set_nested_value(d: Dict[str, Any], keys: List[str], value: Any):
-    """Recursively set a value in a nested dictionary."""
-    if len(keys) == 1:
-        d[keys[0]] = value
-    else:
-        if keys[0] not in d or not isinstance(d[keys[0]], dict):
-            d[keys[0]] = {}
-        _set_nested_value(d[keys[0]], keys[1:], value)
+def _grid_axes(
+    base: BaseModel,
+    grid: dict[str, Any],
+    prefix: tuple[str, ...] = (),
+) -> list[tuple[tuple[str, ...], list[Any]]]:
+    axes = []
+    for name, choices in grid.items():
+        path = (*prefix, name)
+        location = ".".join(path)
+        if "." in name:
+            raise ValueError(f"Use nested grid objects instead of dotted key {location!r}")
+        if name not in type(base).model_fields:
+            raise ValueError(f"Unknown grid field: {location}")
+        if path == ("model", "type"):
+            raise ValueError("Select the architecture in the base configuration, not the grid")
+        field = getattr(base, name)
+        if isinstance(field, BaseModel):
+            if not isinstance(choices, dict):
+                # Pydantic wraps ValueError, but lets TypeError escape validation.
+                raise ValueError(f"{location} must be a nested grid object")  # noqa: TRY004
+            axes.extend(_grid_axes(field, choices, path))
+        else:
+            if not isinstance(choices, list) or not choices:
+                raise ValueError(f"{location} must be a nonempty list of candidate values")
+            axes.append((path, choices))
+    return axes
 
 
 class Sweep:
@@ -61,8 +121,8 @@ class Sweep:
         data_source: TrainingDataSource,
         artifact_store: ArtifactStore,
         ledger: RunLedger,
-        config_path: Optional[str] = None,
-        paths: Optional[PathsConfig] = None,
+        config_path: str | None = None,
+        paths: PathsConfig | None = None,
     ):
         self.config = config
         self.data_source = data_source
@@ -71,47 +131,16 @@ class Sweep:
         self.config_path = config_path
         self.paths = paths
 
-    def _generate_configs(self) -> List[TrainingConfig]:
-        keys = list(self.config.parameters.keys())
-        values_list = list(self.config.parameters.values())
-
-        configs = []
-        base_dict = self.config.base_config.model_dump()
-
-        for combination in itertools.product(*values_list):
-            current_config_dict = copy.deepcopy(base_dict)
-            param_desc = []
-
-            for i, full_key in enumerate(keys):
-                value = combination[i]
-                key_parts = full_key.split(".")
-                _set_nested_value(current_config_dict, key_parts, value)
-                param_desc.append(f"{full_key}={value}")
-
-            if "tags" not in current_config_dict:
-                current_config_dict["tags"] = []
-            if isinstance(current_config_dict["tags"], list) and "grid_search" not in current_config_dict["tags"]:
-                current_config_dict["tags"].append("grid_search")
-
-            desc = current_config_dict.get("description") or self.config.sweep_name
-            current_config_dict["description"] = f"{desc} | {', '.join(param_desc)}"
-
-            try:
-                configs.append(TrainingConfig(**current_config_dict))
-            except Exception as e:
-                logger.error(f"Failed to create config for combination {combination}: {e}")
-
-        return configs
-
     def run(self) -> Iterator[SweepIterationResult]:
         """
         Execute the sweep, yielding results iteratively.
         """
-        configs = self._generate_configs()
+        configs = self.config.configurations
         total = len(configs)
 
         logger.info(f"Generated {total} configurations for sweep: {self.config.sweep_name}")
 
+        failed = 0
         for i, exp_config in enumerate(configs):
             iteration_idx = i + 1
             try:
@@ -124,11 +153,15 @@ class Sweep:
                     paths=self.paths,
                 )
                 result = experiment.run()
-                yield SweepIterationResult(
-                    config=exp_config, index=iteration_idx, total=total, result=result
-                )
             except Exception as e:
-                logger.error(f"Experiment {iteration_idx} failed: {e}", exc_info=True)
+                failed += 1
+                logger.exception(f"Experiment {iteration_idx} failed")
                 yield SweepIterationResult(
-                    config=exp_config, index=iteration_idx, total=total, error=e
+                    config=exp_config, index=iteration_idx, total=total,
+                    failed=failed, error=e,
+                )
+            else:
+                yield SweepIterationResult(
+                    config=exp_config, index=iteration_idx, total=total,
+                    failed=failed, result=result,
                 )

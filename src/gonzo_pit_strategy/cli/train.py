@@ -4,20 +4,30 @@ Command-line interface for training models using the new configuration-driven ar
 
 import argparse
 import json
+import logging
 import os
 import sys
+from typing import Any
 
-from gonzo_pit_strategy.training.config import TrainingConfig
-from gonzo_pit_strategy.training.runner import Experiment
-from gonzo_pit_strategy.training.sweep import SweepConfig, Sweep
-from gonzo_pit_strategy.training.data import DatabaseDataSource
-from gonzo_pit_strategy.training.artifact import ArtifactStore
-import logging
 from gonzo_pit_strategy.config.config import AppConfig, setup_logging
 from gonzo_pit_strategy.db.connection_pool import ConnectionPool
 from gonzo_pit_strategy.db.run_ledger import PostgresRunLedger
+from gonzo_pit_strategy.training.artifact import ArtifactStore
+from gonzo_pit_strategy.training.config import TrainingConfig
+from gonzo_pit_strategy.training.data import DatabaseDataSource
+from gonzo_pit_strategy.training.runner import Experiment
+from gonzo_pit_strategy.training.sweep import Sweep, SweepConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON field: {key!r}")
+        result[key] = value
+    return result
 
 
 def main():
@@ -52,39 +62,35 @@ def main():
         logger.info(f"Default config written to {output_path}")
         return
 
-    # The entry point owns the wiring (ADR 0001 §4): it builds the adapters and
-    # injects them, so nothing downstream constructs its own collaborators.
+    try:
+        config_dict = {}
+        if args.config:
+            logger.info(f"Loading config from {args.config}")
+            with open(args.config) as f:
+                config_dict = json.load(f, object_pairs_hook=_unique_json_object)
+        training_config = TrainingConfig.model_validate(config_dict)
+
+        sweep_config = None
+        if args.grid_search:
+            logger.info(f"Loading grid search parameters from {args.grid_search}")
+            with open(args.grid_search) as f:
+                sweep_params = json.load(f, object_pairs_hook=_unique_json_object)
+            sweep_config = SweepConfig(
+                base_config=training_config,
+                parameters=sweep_params,
+                sweep_name="Grid Search",
+            )
+    except (OSError, ValueError) as exc:
+        logger.error(f"Invalid configuration: {exc}")
+        sys.exit(1)
+
+    # The entry point owns the wiring (ADR 0001 §4).
     pool = ConnectionPool(app_config.db)
     data_source = DatabaseDataSource(pool.engine)
     artifact_store = ArtifactStore(app_config.paths.artifacts_root)
     ledger = PostgresRunLedger(pool)
 
-    config_dict = {}
-
-    if args.config:
-        logger.info(f"Loading config from {args.config}")
-        with open(args.config, "r") as f:
-            config_dict = json.load(f)
-    else:
-        logger.info("No config specified. Using default TrainingConfig defaults.")
-
-    # Grid Search Mode
-    if args.grid_search:
-        logger.info(f"Loading grid search parameters from {args.grid_search}")
-        with open(args.grid_search, "r") as f:
-            sweep_params = json.load(f)
-
-        try:
-            base_config = TrainingConfig(**config_dict)
-            sweep_config = SweepConfig(
-                base_config=base_config,
-                parameters=sweep_params,
-                sweep_name="Grid Search"
-            )
-        except Exception as e:
-            logger.error(f"Invalid base configuration for sweep: {e}")
-            sys.exit(1)
-
+    if sweep_config is not None:
         sweep = Sweep(
             sweep_config,
             data_source,
@@ -94,31 +100,43 @@ def main():
             paths=app_config.paths,
         )
 
-        results = []
-        for iteration in sweep.run():
-            if iteration.error:
-                logger.error(f"Experiment {iteration.index}/{iteration.total} failed: {iteration.error}")
+        outcomes = []
+        try:
+            for iteration in sweep.run():
+                outcomes.append(iteration)
+                if iteration.result is not None:
+                    logger.info(
+                        f"Experiment {iteration.index}/{iteration.total} completed. "
+                        f"Test loss: {iteration.result.test_loss:.4f}"
+                    )
+                else:
+                    logger.error(
+                        f"Experiment {iteration.index}/{iteration.total} failed: {iteration.error}"
+                    )
+        finally:
+            pool.dispose()
+
+        print("\nSweep results")
+        for iteration in outcomes:
+            label = f"{iteration.index}/{iteration.total}"
+            if iteration.result is not None:
+                result = iteration.result
+                print(
+                    f"{label} | COMPLETED | Run ID: {result.run_id} | "
+                    f"{result.model_version} | Test loss: {result.test_loss:.4f}"
+                )
             else:
-                logger.info(f"Experiment {iteration.index}/{iteration.total} completed. Test Loss: {iteration.result.test_loss:.4f}")
-                results.append(iteration.result)
+                print(f"{label} | FAILED | {iteration.error}")
+            print(f"  Configuration: {json.dumps(iteration.config.model_dump(mode='json'))}")
 
-        logger.info("Grid Search Complete.")
-        print("\n--- Grid Search Results ---")
-        print(f"{'Run ID':<10} | {'Model Version':<30} | {'Test Loss':<15}")
-        print("-" * 60)
-        for res in results:
-            run_id_str = str(res.run_id) if res.run_id is not None else "N/A"
-            print(f"{run_id_str:<10} | {res.model_version:<30} | {res.test_loss:<15.4f}")
-
+        summary = outcomes[-1]
+        print(
+            f"Requested: {summary.total} | Succeeded: {summary.succeeded} | "
+            f"Failed: {summary.failed}"
+        )
+        if summary.failed:
+            sys.exit(1)
         return
-
-    # Single Run Mode
-    try:
-        training_config = TrainingConfig(**config_dict)
-    except Exception as e:
-        logger.error(f"Invalid configuration: {e}")
-        logger.debug(f"Config dictionary: {json.dumps(config_dict, indent=2)}")
-        sys.exit(1)
 
     logger.info(f"Starting experiment with model type: {training_config.model.type}")
 
@@ -138,9 +156,11 @@ def main():
         logger.info(f"Run ID: {result.run_id}")
         logger.info(f"Model Version: {result.model_version}")
         logger.info(f"Test Loss: {result.test_loss}")
-    except Exception as e:
-        logger.error(f"Experiment failed: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Experiment failed")
         sys.exit(1)
+    finally:
+        pool.dispose()
 
 
 if __name__ == "__main__":

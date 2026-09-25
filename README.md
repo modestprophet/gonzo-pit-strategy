@@ -196,8 +196,8 @@ evaluated, the Artifact is written to `models/artifacts/<version>/`, and
 through the Run Ledger as a reporting mirror (ADR 0002). Per-epoch metrics
 stream to `training_metrics` and TensorBoard.
 
-Configs are validated by pydantic, so a typo or an out-of-range value fails
-before training starts:
+Training configs reject unknown fields, including nested model fields.
+Pydantic validates values before training starts:
 
 ```json
 {
@@ -226,15 +226,36 @@ the parameters that architecture requires.
 
 ### Hyperparameter sweeps
 
-Dot-notation targets nested fields. Combine with `--config` to fix the base.
+Each Sweep uses one architecture, selected by `model.type` in the base config.
+The grid uses nested objects and nonempty lists of candidate values.
+`model.type` cannot appear in the grid, and dotted keys are rejected.
+
+`config/experiments/dense_sweep.json` requests all 36 combinations of these settings:
 
 ```json
-{ "learning_rate": [0.01, 0.001], "batch_size": [32, 64], "model.dropout_rate": [0.2, 0.5] }
+{
+	"learning_rate": [0.01, 0.001],
+	"batch_size": [8, 16, 32],
+	"model": {
+		"dropout_rate": [0.1, 0.2],
+		"hidden_layers": [[32, 16], [32, 16, 8], [64, 32, 16]]
+	}
+}
 ```
 
 ```bash
-uv run gonzo-train --grid-search config/experiments/sweep_params.json
+uv run gonzo-train \
+	--config config/experiments/training_config_default.json \
+	--grid-search config/experiments/dense_sweep.json
 ```
+
+The entire requested grid validates before any Experiment starts. An invalid
+request rejects the whole Sweep. Runtime failures do not stop later Experiments.
+The CLI prints every outcome and the requested, succeeded, and failed counts.
+It exits with code 1 if any Experiment fails, or 0 if all succeed.
+
+See the [training configuration reference](config/README.md) for empty grids,
+list-valued settings, and validation rules.
 
 ## 6. Predict
 
