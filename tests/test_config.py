@@ -9,8 +9,20 @@ import time and made the documented `.env` workflow a no-op.
 `_env_file=None` isolates each case from the repository's own `.env`.
 """
 
+import os
+
+import pytest
 
 from gonzo_pit_strategy.config.config import AppConfig, LoggingConfig, setup_logging
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(monkeypatch):
+    for name in os.environ:
+        if name in {"DB", "VAULT", "TRAINING", "PATHS", "LOGGING", "APP_ENV"} or name.startswith(
+            ("DB__", "VAULT__", "TRAINING__", "PATHS__", "LOGGING__")
+        ):
+            monkeypatch.delenv(name)
 
 
 def _config(**kwargs) -> AppConfig:
@@ -18,32 +30,20 @@ def _config(**kwargs) -> AppConfig:
     return AppConfig(_env_file=None, **kwargs)
 
 
-class StubVault:
-    """Stands in for Multipass, recording the paths it was asked for."""
+def test_database_defaults_with_an_explicit_password():
+    config = _config(db={"password": "test-password"})
 
-    def __init__(self, secrets=None):
-        self.requested = []
-        self._secrets = secrets if secrets is not None else {"password": "from-vault"}
-
-    def get_secret(self, path):
-        self.requested.append(path)
-        return self._secrets
-
-
-def test_defaults_are_sane_without_env_or_vault(monkeypatch):
-    monkeypatch.delenv("DB__HOST", raising=False)
-    config = _config()
-
-    assert config.app_env == "development"
+    assert "app_env" not in config.model_dump()
+    assert "training" not in config.model_dump()
     assert config.db.host == "localhost"
     assert config.db.port == 5432
-    assert config.vault.enabled is False
 
 
 def test_nested_env_var_populates_db_field(monkeypatch):
     """DB__HOST -> AppConfig.db.host. This is the documented convention."""
     monkeypatch.setenv("DB__HOST", "db.example.internal")
     monkeypatch.setenv("DB__PORT", "6543")
+    monkeypatch.setenv("DB__PASSWORD", "test-password")
 
     config = _config()
 
@@ -60,7 +60,7 @@ def test_single_underscore_env_var_is_not_picked_up(monkeypatch):
     monkeypatch.delenv("DB__HOST", raising=False)
     monkeypatch.setenv("DB_HOST", "ignored.example")
 
-    assert _config().db.host == "localhost"
+    assert _config(db={"password": "test-password"}).db.host == "localhost"
 
 
 def test_config_is_not_frozen_at_import_time(monkeypatch):
@@ -70,6 +70,7 @@ def test_config_is_not_frozen_at_import_time(monkeypatch):
     make both calls return the first value.
     """
     monkeypatch.setenv("DB__HOST", "first.example")
+    monkeypatch.setenv("DB__PASSWORD", "test-password")
     first = _config().db.host
 
     monkeypatch.setenv("DB__HOST", "second.example")
@@ -78,53 +79,9 @@ def test_config_is_not_frozen_at_import_time(monkeypatch):
     assert (first, second) == ("first.example", "second.example")
 
 
-def test_vault_settings_source_injects_password(monkeypatch):
-    """A field marked with `vault_path` is fetched under the configured mount."""
-    monkeypatch.setenv("VAULT__MOUNT_POINT", "secret/data/testing")
-    stub = StubVault()
-
-    config = _config(_vault_client=stub)
-
-    assert config.db.password == "from-vault"
-    assert stub.requested == ["secret/data/testing/password"]
-
-
-def test_env_var_takes_precedence_over_vault(monkeypatch):
-    monkeypatch.setenv("DB__PASSWORD", "from-env")
-    stub = StubVault()
-
-    assert _config(_vault_client=stub).db.password == "from-env"
-
-
-def test_vault_failure_degrades_to_default(monkeypatch):
-    """Vault is optional by design; a broken client must not block startup."""
-
-    class ExplodingVault:
-        def get_secret(self, path):
-            raise RuntimeError("vault unreachable")
-
-    monkeypatch.delenv("DB__PASSWORD", raising=False)
-
-    config = _config(_vault_client=ExplodingVault())
-
-    assert config.db.password == "local_dev_password"
-
-
-def test_vault_enabled_requires_all_three_credentials(monkeypatch):
-    for var in ("VAULT__ADDR", "VAULT__ROLE_ID", "VAULT__SECRET_ID"):
-        monkeypatch.delenv(var, raising=False)
-
-    monkeypatch.setenv("VAULT__ADDR", "http://vault.example:8200")
-    assert _config().vault.enabled is False
-
-    monkeypatch.setenv("VAULT__ROLE_ID", "role")
-    monkeypatch.setenv("VAULT__SECRET_ID", "secret")
-    assert _config().vault.enabled is True
-
-
 def test_paths_config_has_no_separate_checkpoint_dir():
     """ADR 0002: artifacts_root is the sole home for trained models."""
-    paths = _config().paths
+    paths = _config(db={"password": "test-password"}).paths
 
     assert paths.artifacts_root == "models/artifacts"
     assert not hasattr(paths, "checkpoints_dir")
@@ -142,6 +99,29 @@ def test_db_url_round_trip(monkeypatch):
     assert url.database == "f1db"
     assert url.username == "gonzo"
     assert url.drivername == "postgresql"
+
+
+def test_runtime_settings_preserve_source_precedence(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        'DB={"host":"dotenv-host","password":"dotenv-password"}\n'
+        'PATHS__ARTIFACTS_ROOT=dotenv-artifacts\n'
+        'TRAINING=not-json\nAPP_ENV=obsolete\n'
+    )
+    monkeypatch.setenv("TRAINING", "not-json")
+    monkeypatch.setenv("APP_ENV", "obsolete")
+    config = AppConfig()
+    assert config.db.password == "dotenv-password"
+    assert config.paths.artifacts_root == "dotenv-artifacts"
+    assert "app_env" not in config.model_dump()
+    assert "training" not in config.model_dump()
+
+    monkeypatch.setenv("DB__PASSWORD", "env-password")
+    assert AppConfig().db.password == "env-password"
+
+    config = AppConfig(db={"password": "explicit-password"})
+    assert config.db.password == "explicit-password"
+    assert config.db.host == "dotenv-host"
 
 
 def test_setup_logging_applies_level_and_is_idempotent():

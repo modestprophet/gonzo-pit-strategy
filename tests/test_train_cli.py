@@ -16,14 +16,122 @@ from gonzo_pit_strategy.db.models.training_runs import TrainingRun
 
 
 @pytest.fixture
+def unrelated_settings(monkeypatch, tmp_path):
+    import hvac
+
+    monkeypatch.chdir(tmp_path)
+    for name in os.environ:
+        if name in {"DB", "VAULT", "TRAINING", "PATHS", "LOGGING", "APP_ENV"} or name.startswith(
+            ("DB__", "VAULT__", "TRAINING__", "PATHS__", "LOGGING__")
+        ):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("DB__PORT", "invalid")
+    monkeypatch.setenv("TRAINING__EPOCHS", "invalid")
+    monkeypatch.setenv("LOGGING", '{"level": null}')
+    monkeypatch.setenv("PATHS", '{"artifacts_root": null, "tensorboard_dir": []}')
+    monkeypatch.setenv("VAULT__ADDR", "http://vault.invalid")
+    monkeypatch.setenv("VAULT__ROLE_ID", "test-role")
+    monkeypatch.setenv("VAULT__SECRET_ID", "test-secret")
+
+    def vault_forbidden(*args, **kwargs):
+        pytest.fail("This command must not initialize Vault")
+
+    monkeypatch.setattr(hvac, "Client", vault_forbidden)
+
+
+def test_help_needs_no_settings(unrelated_settings, monkeypatch, capsys):
+    from gonzo_pit_strategy.cli.train import main
+
+    monkeypatch.setattr(sys, "argv", ["gonzo-train", "--help"])
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+
+    assert exit_info.value.code == 0
+    assert "--generate-default" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("source", ["environment", "dotenv"])
+@pytest.mark.parametrize("syntax", ["nested", "json"])
+def test_generate_default_resolves_only_its_output_path(
+    unrelated_settings, monkeypatch, tmp_path, capsys, source, syntax,
+):
+    from gonzo_pit_strategy.cli.train import main
+
+    if syntax == "nested":
+        name, value = "PATHS__EXPERIMENTS_DIR", str(tmp_path / "templates")
+    else:
+        name, value = "PATHS", json.dumps({
+            "experiments_dir": str(tmp_path / "templates"),
+            "artifacts_root": None,
+            "tensorboard_dir": [],
+        })
+    if source == "environment":
+        monkeypatch.setenv(name, value)
+    else:
+        (tmp_path / ".env").write_text(f"{name}='{value}'\nTRAINING=not-json\n")
+    monkeypatch.setattr(sys, "argv", ["gonzo-train", "--generate-default"])
+
+    main()
+
+    output = tmp_path / "templates" / "training_config_default.json"
+    settings = json.loads(output.read_text())
+    assert settings["epochs"] == 100
+    assert settings["batch_size"] == 32
+    assert settings["model"]["type"] == "dense"
+    assert str(output) in capsys.readouterr().out
+    assert not (tmp_path / "models").exists()
+    assert not (tmp_path / "logs").exists()
+
+
+def test_generate_default_preserves_nested_settings_precedence(
+    unrelated_settings, monkeypatch, tmp_path,
+):
+    from gonzo_pit_strategy.cli.train import main
+
+    (tmp_path / ".env").write_text(
+        'PATHS={"experiments_dir":"dotenv-json"}\n'
+        'PATHS__EXPERIMENTS_DIR=dotenv-nested\n'
+    )
+    monkeypatch.setattr(sys, "argv", ["gonzo-train", "--generate-default"])
+
+    main()
+    assert (tmp_path / "dotenv-nested" / "training_config_default.json").is_file()
+    assert not (tmp_path / "dotenv-json").exists()
+
+    monkeypatch.setenv("PATHS", '{"experiments_dir":"env-json"}')
+    main()
+    assert (tmp_path / "env-json" / "training_config_default.json").is_file()
+
+    monkeypatch.setenv("PATHS__EXPERIMENTS_DIR", "env-nested")
+    main()
+    assert (tmp_path / "env-nested" / "training_config_default.json").is_file()
+
+
+def test_generate_default_rejects_an_invalid_output_path(
+    unrelated_settings, monkeypatch,
+):
+    from pydantic import ValidationError
+
+    from gonzo_pit_strategy.cli.train import main
+
+    monkeypatch.setenv("PATHS", '{"experiments_dir": null}')
+    monkeypatch.setattr(sys, "argv", ["gonzo-train", "--generate-default"])
+
+    with pytest.raises(ValidationError, match="experiments_dir"):
+        main()
+
+
+@pytest.fixture
 def train_cli(tmp_path):
     env = {
         name: value for name, value in os.environ.items()
-        if not name.startswith(("DB__", "VAULT__", "TRAINING__", "PATHS__", "LOGGING__"))
+        if name not in {"DB", "VAULT", "TRAINING", "PATHS", "LOGGING", "APP_ENV"}
+        and not name.startswith(("DB__", "VAULT__", "TRAINING__", "PATHS__", "LOGGING__"))
     }
     env.update(
         DB__HOST="127.0.0.1",
         DB__PORT="1",
+        DB__PASSWORD="test-password",
         VAULT__ADDR="",
         VAULT__ROLE_ID="",
         VAULT__SECRET_ID="",
@@ -36,15 +144,18 @@ def train_cli(tmp_path):
     base = tmp_path / "base.json"
     base.write_text(json.dumps({"epochs": 1, "model": {"hidden_layers": [2]}}))
 
-    def invoke(grid, *, settings=None, database=None):
+    def invoke(grid, *, settings=None, database=None, environment=None, use_config=True):
         if settings is not None:
             base.write_text(settings)
-        args = [sys.executable, "-m", "gonzo_pit_strategy.cli.train", "--config", str(base)]
+        args = [sys.executable, "-m", "gonzo_pit_strategy.cli.train"]
+        if use_config:
+            args.extend(["--config", str(base)])
         if grid is not None:
             path = tmp_path / "grid.json"
             path.write_text(grid)
             args.extend(["--grid-search", str(path)])
-        command_env = env | (database or {})
+        command_env = env | (database or {}) | (environment or {})
+        command_env = {name: value for name, value in command_env.items() if value is not None}
         return subprocess.run(
             args, cwd=tmp_path, env=command_env, capture_output=True, text=True,
             timeout=60, check=False,
@@ -108,6 +219,28 @@ def test_single_experiment_rejects_invalid_config_files(train_cli, settings, mes
     assert "Traceback" not in result.stderr
 
 
+def test_missing_database_password_fails_cleanly_before_execution(train_cli, tmp_path):
+    result = train_cli(None, environment={"DB__PASSWORD": None})
+
+    assert result.returncode == 1
+    assert "DB__PASSWORD" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "Fetching RawDataset" not in result.stderr
+    assert not (tmp_path / "artifacts").exists()
+
+
+def test_invalid_database_password_does_not_appear_in_cli_errors(train_cli):
+    result = train_cli(None, environment={
+        "DB__PASSWORD": None,
+        "DB": '{"password":{"private":"password-sentinel"}}',
+    })
+
+    assert result.returncode == 1
+    assert "db.password" in result.stderr
+    assert "password-sentinel" not in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 @pytest.fixture(scope="module")
 def cli_database(postgres_pool):
     name = f"gonzo_sweep_{uuid4().hex}"
@@ -145,6 +278,49 @@ def training_database(cli_database, raw_dataset):
         "DB__USER": config.user,
         "DB__PASSWORD": config.password,
     }
+
+
+@pytest.mark.parametrize("use_config", [True, False], ids=["json", "defaults"])
+def test_single_experiment_ignores_training_environment(
+    train_cli, training_database, tmp_path, use_config,
+):
+    from gonzo_pit_strategy.training.artifact import ArtifactStore
+
+    (tmp_path / ".env").write_text("TRAINING=not-json\nTRAINING__EPOCHS=invalid\n")
+    result = train_cli(
+        None,
+        database=training_database,
+        environment={"TRAINING": "not-json", "TRAINING__EPOCHS": "invalid"},
+        use_config=use_config,
+    )
+
+    assert result.returncode == 0, result.stderr
+    artifact, = (tmp_path / "artifacts").iterdir()
+    manifest = ArtifactStore(artifact.parent).load_manifest(artifact.name)
+    assert manifest.training_config["epochs"] == (1 if use_config else 100)
+    assert manifest.training_config["batch_size"] == 32
+    assert manifest.training_config["model"]["hidden_layers"] == ([2] if use_config else [64, 32])
+
+
+def test_sweep_uses_json_and_defaults_not_training_environment(
+    train_cli, training_database, tmp_path,
+):
+    from gonzo_pit_strategy.training.artifact import ArtifactStore
+
+    result = train_cli(
+        '{"epochs": [1]}',
+        database=training_database,
+        environment={"TRAINING__EPOCHS": "7", "TRAINING__BATCH_SIZE": "8"},
+        use_config=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Requested: 1 | Succeeded: 1 | Failed: 0" in result.stdout
+    artifact, = (tmp_path / "artifacts").iterdir()
+    manifest = ArtifactStore(artifact.parent).load_manifest(artifact.name)
+    assert manifest.training_config["epochs"] == 1
+    assert manifest.training_config["batch_size"] == 32
+    assert manifest.training_config["model"]["hidden_layers"] == [64, 32]
 
 
 @pytest.mark.parametrize(

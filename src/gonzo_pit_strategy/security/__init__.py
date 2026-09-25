@@ -1,15 +1,10 @@
-"""Security module for project.
+"""Read-only database credential snapshots from HashiCorp Vault."""
 
-This module provides secure credential management through HashiCorp Vault integration.
-It handles authentication, secret retrieval, and credential management for various
-services including databases, cloud providers, and APIs.
-"""
-
-from .vault import Multipass, VaultError, VaultAuthenticationError, VaultSecretError
+from .vault import Multipass, VaultAuthenticationError, VaultError, VaultSecretError
 
 __all__ = [
-    'Multipass',
-    'VaultError',
-    'VaultAuthenticationError',
-    'VaultSecretError',
+    "Multipass",
+    "VaultAuthenticationError",
+    "VaultError",
+    "VaultSecretError",
 ]

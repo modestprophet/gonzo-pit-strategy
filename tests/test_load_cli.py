@@ -1,6 +1,7 @@
 """Provisioning validation through the real gonzo-load entry point."""
 
 import logging
+import os
 import subprocess
 import sys
 
@@ -26,6 +27,9 @@ ALL_MISSING = f"{ADMIN_MISSING}, {APP_MISSING}"
 @pytest.fixture(autouse=True)
 def isolated_cli(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    for name in os.environ:
+        if name == "LOGGING" or name.startswith("LOGGING__"):
+            monkeypatch.delenv(name)
     for name in ("ADDR", "ROLE_ID", "SECRET_ID"):
         monkeypatch.setenv(f"VAULT__{name}", "")
     monkeypatch.setenv("LOGGING__LEVEL", "INFO")
@@ -179,3 +183,59 @@ def test_load_needs_only_app_credentials_and_reaches_its_file_validation(
     assert f"Required file not found: {tmp_path / 'formula_one_baseteam.csv'}" in error
     assert "Missing required" not in error
     assert "Admin Role" not in error
+
+
+def test_load_resolves_only_logging(monkeypatch, capsys):
+    import hvac
+
+    def vault_forbidden(*args, **kwargs):
+        pytest.fail("Provisioning must not initialize Vault")
+
+    monkeypatch.setattr(hvac, "Client", vault_forbidden)
+    monkeypatch.setenv("DB__PORT", "invalid")
+    monkeypatch.setenv("TRAINING", "not-json")
+    monkeypatch.setenv("PATHS", "not-json")
+    monkeypatch.setenv("VAULT__ADDR", "http://vault.invalid")
+    monkeypatch.setenv("VAULT__ROLE_ID", "test-role")
+    monkeypatch.setenv("VAULT__SECRET_ID", "test-secret")
+    monkeypatch.setenv("LOGGING__LEVEL", "WARNING")
+    monkeypatch.setenv("LOGGING__FORMAT", "load: %(message)s")
+
+    error = failed_cli(monkeypatch, capsys, ["--steps", "unknown"])
+
+    assert error == "load: Unknown step: 'unknown'. Valid steps: init, migrate, load\n"
+    assert logging.getLogger().level == logging.WARNING
+
+
+def test_help_needs_no_settings(monkeypatch, capsys):
+    monkeypatch.setenv("LOGGING", "not-json")
+    monkeypatch.setenv("DB__PORT", "invalid")
+    monkeypatch.setattr(sys, "argv", ["gonzo-load", "--help"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+
+    assert exit_info.value.code == 0
+    assert "--steps" in capsys.readouterr().out
+
+
+def test_load_preserves_logging_source_precedence(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("LOGGING__LEVEL")
+    monkeypatch.delenv("LOGGING__FORMAT")
+    (tmp_path / ".env").write_text(
+        'LOGGING={"level":"WARNING","format":"dotenv: %(message)s"}\n'
+        "DB=not-json\nVAULT=not-json\nTRAINING=not-json\nPATHS=not-json\n"
+    )
+
+    error = failed_cli(monkeypatch, capsys, ["--steps", ""])
+    assert error == "dotenv: No steps requested\n"
+    assert logging.getLogger().level == logging.WARNING
+
+    monkeypatch.setenv("LOGGING", '{"level":"INFO"}')
+    error = failed_cli(monkeypatch, capsys, ["--steps", ""])
+    assert error == "dotenv: No steps requested\n"
+    assert logging.getLogger().level == logging.INFO
+
+    monkeypatch.setenv("LOGGING__FORMAT", "env: %(message)s")
+    error = failed_cli(monkeypatch, capsys, ["--steps", ""])
+    assert error == "env: No steps requested\n"

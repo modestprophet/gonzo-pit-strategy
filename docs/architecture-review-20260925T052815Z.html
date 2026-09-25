@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en" style="background:#101418;color:#e4eaf0;color-scheme:dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#101418">
+  <title>Current-code architecture review | Gonzo pit strategy</title>
+  <style>
+    :root { color-scheme:dark; --bg:#101418; --panel:#171e25; --inset:#11181e; --line:#35434e; --text:#e4eaf0; --muted:#b1bdc8; --accent:#83e0c4; --warn:#efca87; --red:#ffa3ad; }
+    * { box-sizing:border-box; }
+    html { background:var(--bg); scroll-padding-top:24px; }
+    html body { margin:0; background:var(--bg); color:var(--text); font:16px/1.65 system-ui,sans-serif; }
+    main { max-width:1180px; margin:auto; padding:64px 28px 80px; }
+    h1,h2,h3,p,pre,figure { margin:0; }
+    body h1 { max-width:850px; margin:15px 0 22px; font-size:clamp(2.3rem,5.5vw,4rem); font-weight:650; letter-spacing:-.045em; line-height:1.1; }
+    body h2 { font-size:clamp(1.5rem,3vw,2rem); font-weight:620; line-height:1.25; letter-spacing:-.025em; }
+    body h3 { font-size:1rem; font-weight:650; }
+    body a { color:var(--accent); text-decoration:underline; text-underline-offset:4px; }
+    a:hover { color:#c5f7e9; }
+    a:focus-visible { outline:2px solid var(--accent); outline-offset:5px; }
+    body code,body pre { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    body code { font-size:.88em; overflow-wrap:anywhere; }
+    p code { color:#c9dfed; }
+    .eyebrow,.figure-label { font-size:.73rem; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); }
+    .meta,.legend,.badges,.wins,nav { display:flex; flex-wrap:wrap; gap:10px 22px; }
+    .meta { color:var(--muted); font-size:.87rem; }
+    nav { margin:25px 0; }
+    nav a { font-size:.92rem; }
+    .legend { padding:17px 0 26px; border-top:1px solid var(--line); font-size:.78rem; color:var(--muted); }
+    .legend span { display:inline-flex; align-items:center; gap:8px; }
+    .key { display:inline-block; width:23px; height:15px; border:1px solid var(--muted); }
+    .key.deep { border:3px solid var(--accent); background:#15322d; }
+    .key.seam { height:0; border:0; border-top:2px dashed var(--muted); }
+    .key.leak { height:0; border:0; border-top:2px solid var(--red); }
+    .candidate { margin-top:28px; padding:30px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .candidate-head { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; }
+    .number { color:var(--accent); margin-bottom:8px; font:500 .85rem ui-monospace,monospace; }
+    .badges { gap:8px; margin:16px 0 20px; }
+    .badge { display:inline-flex; padding:3px 11px; border-radius:20px; border:1px solid var(--line); font-size:.75rem; color:var(--muted); }
+    .strong { color:var(--accent); background:#19332d; border-color:#42685b; }
+    .explore { color:var(--warn); background:#332d20; border-color:#6e5c39; }
+    .files { margin-bottom:24px; padding:14px 17px; border-left:2px solid var(--line); background:var(--inset); font-size:.78rem; }
+    .files ul { list-style:none; margin:5px 0 0; padding:0; }
+    .files li { margin:3px 0; overflow-wrap:anywhere; }
+    .files a { color:#b7cbd9; }
+    .diagram-pair { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:24px 0; }
+    figure { min-width:0; border:1px solid var(--line); border-radius:9px; background:var(--inset); padding:18px; }
+    .figure-label { margin-bottom:15px; }
+    .figure-label.after { color:var(--accent); }
+    .diagram-stage { min-height:310px; display:flex; flex-direction:column; justify-content:center; gap:12px; }
+    .mermaid { white-space:pre-wrap; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
+    .mermaid svg { display:block; width:100%; max-height:345px; height:auto; margin:auto; }
+    figcaption { margin-top:16px; padding-top:13px; border-top:1px solid #293640; font-size:.79rem; color:var(--muted); }
+    .module { border:1px solid #526572; border-radius:5px; background:#202c36; padding:11px 14px; text-align:center; font-size:.84rem; }
+    .module small { display:block; color:var(--muted); font-size:.75rem; margin-top:3px; }
+    .module.deep { border:3px solid #69bca5; background:#162c28; padding:0; }
+    .module-title { padding:10px; font-weight:650; color:#b8f4e1; }
+    .implementation { border-top:1px dashed #77998e; padding:15px; font-size:.82rem; color:#d0e2dc; text-align:left; }
+    .implementation p+p { margin-top:8px; }
+    .connector { display:block; width:24px; height:24px; margin:0 auto; color:var(--muted); flex-shrink:0; }
+    .connector.leak { color:var(--red); }
+    .split { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .fact { padding:10px; border:1px solid #9d606a; border-radius:5px; background:#2c2229; font-size:.77rem; }
+    .fact span { display:block; color:var(--red); margin-top:4px; }
+    .seam-label { text-align:center; font-size:.72rem; color:var(--muted); border-top:1px dashed #6d818f; padding-top:7px; }
+    .copy-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+    .copy-grid p { margin-top:6px; font-size:.91rem; color:#cbd5de; }
+    .wins { list-style:none; padding:0; margin:21px 0; gap:7px 18px; color:var(--accent); font-size:.83rem; }
+    .wins li { border-left:2px solid #508b7a; padding-left:10px; }
+    .evidence { margin-top:22px; padding:18px; background:var(--inset); border-radius:7px; }
+    .evidence h3 { margin-bottom:10px; }
+    .evidence p { font-size:.86rem; color:#cbd5de; }
+    .evidence p+p { margin-top:10px; }
+    .probe { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:12px 0; }
+    .probe div { padding:10px 12px; background:#202a33; border-radius:5px; font-size:.78rem; color:var(--muted); }
+    .probe strong { display:block; color:var(--text); font-size:1.05rem; font-weight:600; }
+    .probe .bad strong { color:var(--red); }
+    .limit { margin-top:17px; font-size:.83rem; color:var(--warn); }
+    .notes { margin-top:40px; padding:27px 0; border-top:1px solid var(--line); }
+    .notes h2 { font-size:1.4rem; margin-bottom:17px; }
+    .notes ul { list-style:disc; padding-left:20px; color:#cbd5de; font-size:.9rem; }
+    .notes li+li { margin-top:12px; }
+    .notes p { color:var(--muted); font-size:.9rem; margin-top:12px; }
+    .command { padding:14px 16px; margin:16px 0; border:1px solid var(--line); border-radius:6px; background:var(--inset); white-space:pre-wrap; overflow-wrap:anywhere; font-size:.76rem; }
+    .top { margin-top:32px; padding:30px; border:2px solid #578e7e; border-radius:12px; background:#172923; }
+    .top h2 { margin:9px 0 15px; }
+    .top p { color:#ccded6; margin-bottom:18px; }
+    @media(max-width:760px) { main { padding:35px 16px; } .candidate { padding:20px 16px; } .diagram-pair,.copy-grid { grid-template-columns:1fr; } .diagram-stage { min-height:270px; } .legend { gap:12px; } .probe { grid-template-columns:1fr; } }
+    @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; } }
+  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad:true,
+      theme:"base",
+      securityLevel:"strict",
+      themeVariables:{
+        darkMode:true, background:"#11181e", primaryColor:"#202c36",
+        primaryTextColor:"#e4eaf0", primaryBorderColor:"#647b8c",
+        lineColor:"#adbfce", secondaryColor:"#172923", tertiaryColor:"#202c36",
+        edgeLabelBackground:"#11181e", clusterBkg:"#171e25", clusterBorder:"#526572",
+        fontFamily:"system-ui, sans-serif", fontSize:"13px"
+      },
+      flowchart:{htmlLabels:false, curve:"linear", nodeSpacing:20, rankSpacing:28}
+    });
+  </script>
+</head>
+<body>
+  <main class="mx-auto">
+    <header>
+      <div class="eyebrow">Gonzo pit strategy · Current-code review</div>
+      <h1>Where modules can own more of the work</h1>
+      <div class="meta">
+        <span>25 September 2026</span>
+        <span>Python, dbt SQL, and tests</span>
+        <span>No git history or prior architecture prose</span>
+      </div>
+      <nav aria-label="Review candidates">
+        <a href="#configuration">01 · Command configuration</a>
+        <a href="#completion">02 · Run completion</a>
+        <a href="#vault">03 · Vault settings</a>
+        <a href="#top-recommendation">Top recommendation</a>
+      </nav>
+      <div class="legend" aria-label="Diagram legend">
+        <span><i class="key" aria-hidden="true"></i>Module</span>
+        <span><i class="key seam" aria-hidden="true"></i>Seam</span>
+        <span><i class="key leak" aria-hidden="true"></i>Leaked or conflicting responsibility</span>
+        <span><i class="key deep" aria-hidden="true"></i>Deep module</span>
+      </div>
+    </header>
+
+    <section id="candidates" aria-label="Module-deepening candidates" class="space-y-8">
+      <article id="configuration" class="candidate">
+        <div class="candidate-head"><div><div class="number">01</div><h2>Give command configuration one owner</h2></div></div>
+        <div class="badges"><span class="badge strong">Strong</span><span class="badge">in-process</span><span class="badge">Behavior reproduced with execution doubles</span></div>
+        <div class="files font-mono text-sm">
+          <div class="eyebrow">Files and evidence</div>
+          <ul>
+            <li><a href="../src/gonzo_pit_strategy/config/config.py">config/config.py</a>, lines 208 to 226 · AppConfig resolves training and app_env.</li>
+            <li><a href="../src/gonzo_pit_strategy/cli/train.py">cli/train.py</a>, lines 33 to 101 and 145 to 153 · The command resolves training again.</li>
+            <li><a href="../src/gonzo_pit_strategy/cli/load.py">cli/load.py</a>, lines 57 to 59 · Provisioning loads AppConfig only for logging.</li>
+            <li><a href="../src/gonzo_pit_strategy/training/runner.py">training/runner.py</a>, lines 49 to 65 and 98 to 100 · Experiment defaults to local.</li>
+            <li><a href="../src/gonzo_pit_strategy/training/sweep.py">training/sweep.py</a>, lines 118 to 154 · Sweep does not forward an environment.</li>
+          </ul>
+        </div>
+        <div class="diagram-pair grid md:grid-cols-2 gap-5">
+          <figure>
+            <div class="figure-label">Before · Two configuration paths</div>
+            <div class="diagram-stage">
+              <pre class="mermaid">
+flowchart TB
+  E[Environment settings] --> A[AppConfig]
+  A --> U[Training and app_env unused]
+  A --> P[Database and paths]
+  J[JSON file or empty object] --> T[TrainingConfig]
+  P --> R[Experiment or Sweep]
+  T --> R
+  classDef conflict fill:#302229,stroke:#ffa3ad,color:#ffd3d9;
+  class U conflict;
+  linkStyle 1 stroke:#ffa3ad,stroke-width:2px;
+              </pre>
+            </div>
+            <figcaption>The training command consumes database and path settings but discards the resolved training settings and environment.</figcaption>
+          </figure>
+          <figure>
+            <div class="figure-label after">After · One authoritative resolution</div>
+            <div class="diagram-stage">
+              <div class="module">Command arguments and supported settings sources</div>
+              <svg class="connector" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1v19m-5-5 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+              <div class="module deep">
+                <div class="module-title">Command configuration module</div>
+                <div class="implementation">
+                  <p>Resolve only what this command needs.</p>
+                  <p>Own precedence and validation.</p>
+                  <p>Carry the chosen environment into each run.</p>
+                </div>
+              </div>
+              <div class="seam-label">The execution seam receives effective settings.</div>
+              <div class="module">Experiment or Sweep</div>
+            </div>
+            <figcaption>Keep dependency wiring in the entry point. Remove the competing configuration path rather than adding another pass-through module.</figcaption>
+          </figure>
+        </div>
+        <div class="copy-grid">
+          <div><h3>Problem</h3><p>The command interface accepts settings that never reach execution, while a logging-only caller validates unrelated settings.</p></div>
+          <div><h3>Solution</h3><p>Deepen command configuration so its implementation owns resolution once, before the entry point constructs execution dependencies.</p></div>
+        </div>
+        <ul class="wins"><li>Locality keeps precedence decisions together.</li><li>Leverage reaches both command callers.</li><li>Tests cross the command interface.</li></ul>
+        <div class="evidence">
+          <h3>Observed behavior</h3>
+          <div class="probe">
+            <div>AppConfig resolves<strong>epochs = 7</strong></div>
+            <div class="bad">The CLI passes to Experiment<strong>epochs = 100</strong></div>
+            <div>AppConfig resolves<strong>app_env = review</strong></div>
+            <div class="bad">The CLI omits environment<strong>Experiment defaults to local</strong></div>
+          </div>
+          <p>The probe ran the real training entry point with an isolated environment and no .env file. Execution doubles captured its arguments without training or connecting to a database.</p>
+          <p><strong>Deletion test.</strong> Remove the unused resolution path and unrelated startup requirements. Moving both paths into a new function would add no depth.</p>
+          <p><strong>Tests to change.</strong> Extend <a href="../tests/test_train_cli.py">test_train_cli.py</a> to prove settings reach single runs and sweeps. Check that training settings cannot block the logging-only path in <a href="../tests/test_load_cli.py">test_load_cli.py</a>.</p>
+          <p><strong>Adapter discipline.</strong> Keep the existing settings-source adapter mechanism. This work does not justify a new configurable command framework.</p>
+        </div>
+        <p class="limit">First decide whether training is deliberately JSON-only. If it is, delete AppConfig.training instead of inventing precedence between environment settings and files.</p>
+      </article>
+
+      <article id="completion" class="candidate">
+        <div class="number">02</div><h2>Make run completion own consistency</h2>
+        <div class="badges"><span class="badge explore">Worth exploring</span><span class="badge">ports &amp; adapters</span><span class="badge">One production caller, two adapters</span></div>
+        <div class="files font-mono text-sm">
+          <div class="eyebrow">Files and evidence</div>
+          <ul>
+            <li><a href="../src/gonzo_pit_strategy/training/ledger.py">training/ledger.py</a>, lines 80 to 96 · Completion accepts overlapping facts.</li>
+            <li><a href="../src/gonzo_pit_strategy/training/artifact.py">training/artifact.py</a>, lines 62 to 87 · The manifest already carries provenance and epochs.</li>
+            <li><a href="../src/gonzo_pit_strategy/training/runner.py">training/runner.py</a>, lines 158 to 185 · Experiment supplies those facts again.</li>
+            <li><a href="../src/gonzo_pit_strategy/db/run_ledger.py">db/run_ledger.py</a>, lines 78 to 115 · The adapter stores each copy independently.</li>
+            <li><a href="../tests/test_run_ledger_contract.py">tests/test_run_ledger_contract.py</a>, lines 42 to 55 and 205 to 223 · A case supplies conflicting fingerprints.</li>
+          </ul>
+        </div>
+        <div class="diagram-pair grid md:grid-cols-2 gap-5">
+          <figure>
+            <div class="figure-label">Before · Caller synchronizes copies</div>
+            <div class="diagram-stage">
+              <div class="module">Experiment</div>
+              <svg class="connector leak" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1v19m-5-5 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+              <div class="split">
+                <div class="fact">ArtifactManifest<span>Dataset fingerprint</span><span>Epoch count</span></div>
+                <div class="fact">Separate arguments<span>DatasetProvenance fingerprint</span><span>Epoch count again</span></div>
+              </div>
+              <div class="seam-label">RunRecorder.complete accepts both accounts.</div>
+              <div class="module">Run Ledger adapter<small>The manifest and run can disagree.</small></div>
+            </div>
+            <figcaption>The interface makes consistency a caller obligation. The current Experiment supplies matching values, but the seam does not require them.</figcaption>
+          </figure>
+          <figure>
+            <div class="figure-label after">After · Consistency belongs to completion</div>
+            <div class="diagram-stage">
+              <div class="module">Experiment publishes the artifact first.</div>
+              <svg class="connector" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1v19m-5-5 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+              <div class="module deep">
+                <div class="module-title">Run completion module</div>
+                <div class="implementation">
+                  <p>One authority for completed epochs.</p>
+                  <p>The dataset link agrees with the artifact.</p>
+                  <p>Run-specific features stay distinct from raw dataset identity.</p>
+                </div>
+              </div>
+              <div class="seam-label">Both adapters obey the same completion rules.</div>
+              <div class="split"><div class="module">Postgres adapter</div><div class="module">In-memory adapter</div></div>
+            </div>
+            <figcaption>Increase depth at the existing seam. Keep artifact publication separate from the database transaction.</figcaption>
+          </figure>
+        </div>
+        <div class="copy-grid">
+          <div><h3>Problem</h3><p>The completion interface accepts several accounts of one training run without enforcing agreement.</p></div>
+          <div><h3>Solution</h3><p>Make the completion module own consistency, while each adapter keeps its storage implementation.</p></div>
+        </div>
+        <ul class="wins"><li>Locality concentrates completion rules.</li><li>Leverage covers both ledger adapters.</li><li>Tests exercise the existing seam.</li></ul>
+        <div class="evidence">
+          <h3>The existing contract permits disagreement</h3>
+          <p>The different-fingerprints test changes DatasetProvenance but reuses the first fingerprint in its manifest. The in-memory case passed during this review.</p>
+          <p>The Postgres implementation also stores those inputs independently, as shown by inspection. This review did not run that adapter or demonstrate corrupt production records.</p>
+          <p><strong>Related meaning to settle.</strong> <a href="../src/gonzo_pit_strategy/training/data.py">training/data.py, lines 213 to 266</a> fingerprints raw data but counts selected features. <a href="../src/gonzo_pit_strategy/db/run_ledger.py">db/run_ledger.py, lines 138 to 164</a> reuses the first dataset row for that fingerprint.</p>
+          <p><strong>Deletion test.</strong> Remove the caller's obligation to synchronize duplicate facts. A new record that merely holds the same conflicting values adds no depth.</p>
+          <p><strong>Tests to change.</strong> Extend the shared ledger contract with conflicting-fact cases and with different feature selections over the same raw dataset.</p>
+        </div>
+        <p class="limit">Keep this narrow. Experiment is the only production completion caller, and existing manifests allow missing provenance. Do not make older artifacts unloadable.</p>
+      </article>
+
+      <article id="vault" class="candidate">
+        <div class="number">03</div><h2>Concentrate Vault settings resolution</h2>
+        <div class="badges"><span class="badge explore">Worth exploring</span><span class="badge">mock</span><span class="badge">Bootstrap mismatch reproduced</span></div>
+        <div class="files font-mono text-sm">
+          <div class="eyebrow">Files and evidence</div>
+          <ul>
+            <li><a href="../src/gonzo_pit_strategy/config/config.py">config/config.py</a>, lines 248 to 274 · Bootstrap uses a separate top-level merge.</li>
+            <li><a href="../src/gonzo_pit_strategy/config/config.py">config/config.py</a>, lines 57 to 118 · The settings source creates the client and handles fallback.</li>
+            <li><a href="../src/gonzo_pit_strategy/security/vault.py">security/vault.py</a>, lines 31 to 49 and 103 to 130 · Multipass translates responses and failures.</li>
+            <li><a href="../tests/test_config.py">tests/test_config.py</a>, lines 21 to 30 and 81 to 122 · StubVault bypasses the SDK translation.</li>
+          </ul>
+        </div>
+        <div class="diagram-pair grid md:grid-cols-2 gap-5">
+          <figure>
+            <div class="figure-label">Before · Two interpretations of settings</div>
+            <div class="diagram-stage">
+              <pre class="mermaid">
+flowchart TB
+  S[Environment plus explicit override] --> B[Manual top-level merge]
+  S --> P[Pydantic nested merge]
+  B --> D[Vault client disabled]
+  P --> E[AppConfig says Vault enabled]
+  D -. disagrees .-> E
+  classDef conflict fill:#302229,stroke:#ffa3ad,color:#ffd3d9;
+  class D,E conflict;
+  linkStyle 4 stroke:#ffa3ad,stroke-width:2px;
+              </pre>
+            </div>
+            <figcaption>A mount-point override replaces the bootstrap credential dictionary, although the final settings model retains the credentials.</figcaption>
+          </figure>
+          <figure>
+            <div class="figure-label after">After · Settings own the resolution rule</div>
+            <div class="diagram-stage">
+              <div class="module">Environment plus explicit override</div>
+              <svg class="connector" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1v19m-5-5 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+              <div class="module deep">
+                <div class="module-title">Vault settings module</div>
+                <div class="implementation">
+                  <p>One bootstrap precedence rule.</p>
+                  <p>Private SDK response translation.</p>
+                  <p>One owner for optional-source fallback.</p>
+                </div>
+              </div>
+              <div class="seam-label">The settings-source interface returns resolved values.</div>
+              <div class="module">AppConfig</div>
+            </div>
+            <figcaption>Concentrate responsibility without introducing an interchangeable secret-provider framework. Keep an internal SDK seam for tests.</figcaption>
+          </figure>
+        </div>
+        <div class="copy-grid">
+          <div><h3>Problem</h3><p>A shallow bootstrap merge disagrees with final settings resolution, and error handling spans the settings source and Multipass.</p></div>
+          <div><h3>Solution</h3><p>Give the Vault settings module one precedence rule and keep SDK translation and fallback behind its interface.</p></div>
+        </div>
+        <ul class="wins"><li>Locality concentrates settings-source behavior.</li><li>Leverage removes duplicate resolution rules.</li><li>Tests include SDK response translation.</li></ul>
+        <div class="evidence">
+          <h3>Observed bootstrap mismatch</h3>
+          <div class="probe">
+            <div>Credentials in the environment, mount override in kwargs<strong>config.vault.enabled = true</strong></div>
+            <div class="bad">The same construction<strong>Multipass never constructed</strong></div>
+          </div>
+          <p>The isolated probe used placeholder credentials, disabled .env loading, and mocked Multipass. No Vault request occurred.</p>
+          <p><strong>Deletion test.</strong> Delete the competing merge rule and redundant public obligations. Copying Multipass into config.py without narrowing what callers know adds no depth.</p>
+          <p><strong>Tests to change.</strong> Cover nested settings split across sources, then exercise the real settings adapter with SDK-shaped responses rather than only pre-normalized StubVault values.</p>
+          <p><strong>Adapter discipline.</strong> There is one external Vault adapter and a stub, not evidence for several production secret providers.</p>
+        </div>
+        <p class="limit">Fix the merge and test it first. Broader consolidation is optional, and Multipass is publicly exported. Check external consumers before removing its operations.</p>
+      </article>
+    </section>
+
+    <section class="notes" aria-labelledby="preserve-title">
+      <h2 id="preserve-title">Keep the depth that already exists</h2>
+      <ul>
+        <li><a href="../src/gonzo_pit_strategy/training/artifact.py">ArtifactStore</a> owns staging and publication. <a href="../tests/test_artifact_publication.py">Its tests</a> exercise competing writers and process termination. Deleting it would spread publication rules into callers.</li>
+        <li><a href="../src/gonzo_pit_strategy/training/runner.py">Experiment.run</a> owns the order of training, evaluation, publication, and recording. <a href="../tests/test_runner.py">Runner tests</a> check the saved model and usable artifacts after ledger failure. Keep this sequence together.</li>
+        <li><a href="../src/gonzo_pit_strategy/training/sweep.py">Sweep</a> validates combinations before execution and owns failure continuation. <a href="../src/gonzo_pit_strategy/db/provisioning.py">Provisioner</a> owns phase normalization, preflight, and execution order. Their size is not evidence of shallow modules.</li>
+        <li><a href="../src/gonzo_pit_strategy/training/data.py">prepare_features</a> has training and inference callers. Removing it would duplicate coercion behavior, not remove complexity.</li>
+      </ul>
+    </section>
+
+    <section class="notes" aria-labelledby="deferred-title">
+      <h2 id="deferred-title">Do not turn every finding into a refactor</h2>
+      <ul>
+        <li><a href="../src/gonzo_pit_strategy/db/connection_pool.py">ConnectionPool</a> and <a href="../src/gonzo_pit_strategy/db/base.py">db_session</a> split session ownership, but current production transaction calls are already concentrated in the ledger adapter. Leave this lower-leverage cleanup out of the first change.</li>
+        <li><a href="../dbt/models/ml_prep/prep_scaled.sql">prep_scaled.sql, lines 18 to 39</a> fits statistics across all rows before <a href="../src/gonzo_pit_strategy/training/data.py">data.py, lines 237 to 248</a> splits the dataset. Held-out rows influence preprocessing. This needs a training-semantics investigation, not a generic module extraction. The effect on evaluation metrics was not measured.</li>
+      </ul>
+    </section>
+
+    <section class="notes" aria-labelledby="verification-title">
+      <h2 id="verification-title">Evidence and limits</h2>
+      <p>This review used current Python implementation, SQL, configuration definitions, and tests. It did not read git history, README, existing architecture reports, or deleted prose.</p>
+      <p>No CONTEXT.md or docs/adr files were present. Source comments still mention ADR numbers, but this review did not reconstruct those decisions or treat the comments as proof of behavior.</p>
+      <p>The local check passed 14 tests, with 11 Postgres cases deliberately deselected. Keras emitted one NumPy FutureWarning.</p>
+      <pre class="command">PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv-isolated/bin/python3 -m pytest -p no:cacheprovider tests/test_data.py tests/test_run_ledger_contract.py -k 'not postgres'</pre>
+      <p>The configuration probes used the installed code with isolated environment variables and mocked external dependencies. The test run covered data loading and the in-memory ledger, not actual training, Postgres behavior, a dbt build, or a live Vault.</p>
+      <p>Chromium rendered both Mermaid graphs and showed no horizontal page overflow at widths of 1360 and 390 pixels. It also emitted a local-file origin warning and Tailwind's CDN production-use warning. All local source links and section anchors passed validation.</p>
+      <p>Each after diagram describes a responsibility change, not a proposed interface. The HTML contains its own styles and prose. Tailwind and Mermaid load from CDNs. Captions preserve each diagram's meaning if the CDN is unavailable.</p>
+    </section>
+
+    <section id="top-recommendation" class="top">
+      <div class="eyebrow">Top recommendation</div>
+      <h2>Start with command configuration</h2>
+      <p>The current command demonstrably discards accepted settings, so fixing ownership removes a real execution mismatch without disturbing the training and artifact modules.</p>
+      <a href="#configuration">Explore candidate 01</a>
+    </section>
+  </main>
+</body>
+</html>

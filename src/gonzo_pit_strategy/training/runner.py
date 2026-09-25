@@ -54,7 +54,6 @@ class Experiment:
         ledger: RunLedger,
         config_path: Optional[str] = None,
         paths: Optional[PathsConfig] = None,
-        environment: str = "local",
     ):
         self.config = config
         self.data_source = data_source
@@ -62,7 +61,6 @@ class Experiment:
         self.ledger = ledger
         self.config_path = config_path
         self.paths = paths or PathsConfig()
-        self.environment = environment
 
     def run(self) -> ExperimentResult:
         """
@@ -97,7 +95,7 @@ class Experiment:
 
         model_version = f"{self.config.model.type}_{uuid4().hex}"
 
-        with self.ledger.run(self.config, environment=self.environment) as run:
+        with self.ledger.run(self.config) as run:
             # 3. Setup Callbacks — per-epoch concerns only.
             cb_list = []
 

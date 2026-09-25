@@ -39,7 +39,6 @@ class RecordedRun:
     """What the ledger would have written for one Training Run."""
 
     config: TrainingConfig
-    environment: str
     status: str = "RUNNING"
     run_id: int = 1
     model_id: Optional[int] = None
@@ -128,10 +127,8 @@ class InMemoryRunLedger:
             self.dataset_versions.append(key)
 
     @contextmanager
-    def run(self, config: TrainingConfig, *, environment: str = "local"):
-        record = RecordedRun(
-            config=config, environment=environment, run_id=len(self.runs) + 1
-        )
+    def run(self, config: TrainingConfig):
+        record = RecordedRun(config=config, run_id=len(self.runs) + 1)
         self.runs.append(record)
         recorder = InMemoryRunRecorder(record, self)
         try:

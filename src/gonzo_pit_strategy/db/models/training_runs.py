@@ -14,7 +14,6 @@ class TrainingRun(Base):
     status = Column(String(20))
     epochs_completed = Column(Integer, default=0)
     early_stopping = Column(Boolean, default=False)
-    environment_id = Column(String(100))
 
     __table_args__ = (
         CheckConstraint("status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')"),

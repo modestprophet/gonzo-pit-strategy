@@ -99,9 +99,7 @@ class RunRecorder(Protocol):
 class RunLedger(Protocol):
     """Owner of the database record of Training Runs."""
 
-    def run(
-        self, config: TrainingConfig, *, environment: str = "local"
-    ) -> ContextManager[RunRecorder]:
+    def run(self, config: TrainingConfig) -> ContextManager[RunRecorder]:
         """Open a Training Run and yield its recorder.
 
         The run is written before the block body starts, so it is visible as

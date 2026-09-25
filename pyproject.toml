@@ -11,8 +11,9 @@ dependencies = [
     "pandas>=2.0.0",
     "psycopg2-binary>=2.9.0",
     "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
+    "pydantic-settings>=2.14.0",
     "python-dotenv>=1.0.0",
+    "requests>=2.32.0",
     "scikit-learn>=1.0.0",
     "sqlalchemy>=2.0.0",
     # Used unconditionally by the TensorBoard callback in training/runner.py.

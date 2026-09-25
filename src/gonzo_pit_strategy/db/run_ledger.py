@@ -171,9 +171,7 @@ class PostgresRunLedger:
         self._pool = pool
 
     @contextmanager
-    def run(
-        self, config: TrainingConfig, *, environment: str = "local"
-    ) -> Iterator[_PostgresRunRecorder]:
+    def run(self, config: TrainingConfig) -> Iterator[_PostgresRunRecorder]:
         with db_session(self._pool) as session:
             training_run = TrainingRun(
                 model_id=None,
@@ -182,7 +180,6 @@ class PostgresRunLedger:
                 status="RUNNING",
                 epochs_completed=0,
                 early_stopping=config.early_stopping_patience > 0,
-                environment_id=environment,
             )
             session.add(training_run)
             session.flush()

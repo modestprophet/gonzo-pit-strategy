@@ -198,8 +198,8 @@ def test_mirror_completion_failure_leaves_saved_artifact_loadable(
 
     class FailingMirrorLedger:
         @contextmanager
-        def run(self, config, *, environment="local"):
-            with ledger.run(config, environment=environment) as recorder:
+        def run(self, config):
+            with ledger.run(config) as recorder:
                 def fail_completion(*args, **kwargs):
                     raise RuntimeError("mirror completion failed")
 

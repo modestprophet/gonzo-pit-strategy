@@ -4,9 +4,7 @@ This module builds a `DatabaseTarget` and two `Role`s from arguments, calls
 `provision`, and prints the result. Provisioning owns phase selection,
 credential requirements, the Load Plan, and failure handling.
 
-Credentials arrive as arguments rather than through `AppConfig` because this
-runs before the application has a database to connect to. `AppConfig` is
-consulted only for logging, so `logger.info` reaches the terminal.
+Credentials arrive as arguments. LoadSettings resolves only logging.
 """
 
 import argparse
@@ -14,7 +12,7 @@ import logging
 import sys
 from pathlib import Path
 
-from gonzo_pit_strategy.config.config import AppConfig, setup_logging
+from gonzo_pit_strategy.config.config import LoadSettings, setup_logging
 from gonzo_pit_strategy.db.provisioning import (
     DatabaseTarget,
     Provisioner,
@@ -56,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    setup_logging(AppConfig().logging)
+    setup_logging(LoadSettings().logging)
 
     provisioner = Provisioner(
         DatabaseTarget(

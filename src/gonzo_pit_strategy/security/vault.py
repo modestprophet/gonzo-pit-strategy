@@ -1,152 +1,109 @@
-"""Vault integration for secure secrets management.
+"""Fetch a database credential from Vault as a read-only snapshot."""
 
-This module provides a client for interacting with HashiCorp Vault, including
-authentication, secret retrieval, and renewal of credentials.
-"""
+from dataclasses import dataclass, field
 
 import hvac
-import hvac.exceptions
-from functools import wraps
-from typing import Optional, Dict, List, Any
+from hvac.exceptions import InvalidPath
+from hvac.exceptions import VaultError as HvacError
+from requests.exceptions import RequestException
 
-import logging
-
-logger = logging.getLogger(__name__)
 
 class VaultError(Exception):
     """Base exception for Vault-related errors."""
-    pass
 
 
 class VaultAuthenticationError(VaultError):
     """Raised when authentication with Vault fails."""
-    pass
 
 
 class VaultSecretError(VaultError):
     """Raised when a secret cannot be retrieved."""
-    pass
 
 
-def handle_vault_errors(func):
-    """Decorator to handle Vault client errors."""
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except hvac.exceptions.Unauthorized as e:
-            logger.error(f"Vault authentication failed: {str(e)}")
-            raise VaultAuthenticationError(f"Vault authentication failed: {str(e)}")
-        except hvac.exceptions.InvalidPath as e:
-            logger.error(f"Invalid Vault path: {str(e)}")
-            raise VaultSecretError(f"Invalid Vault path: {str(e)}")
-        except hvac.exceptions.VaultError as e:
-            logger.error(f"Vault operation failed: {str(e)}")
-            raise VaultError(f"Vault operation failed: {str(e)}")
-        except Exception as e:
-            logger.error(f"An unexpected error occurred: {str(e)}")
-            raise VaultError(f"An unexpected error occurred: {str(e)}")
-
-    return wrapper
-
-
+@dataclass(frozen=True, slots=True)
 class Multipass:
-    """Client for interacting with HashiCorp Vault.
+    """An immutable password snapshot; its representation omits the password."""
 
-    This class provides an interface to Vault operations,
-    handling authentication, token renewal, and secret retrieval.
-    """
+    db_password: str = field(repr=False)
 
-    def __init__(self, url: str, role_id: str, secret_id: str) -> None:
-        """Initialize a Vault client.
+    def __post_init__(self) -> None:
+        if not isinstance(self.db_password, str) or not self.db_password:
+            raise VaultSecretError(
+                "Vault database password must be a nonempty string; "
+                "check the password field in the configured secret."
+            ) from None
 
-        Credentials are injected by the caller (ADR 0001 §1) — this class does
-        not read the environment. `AppConfig.vault` is the source of truth.
-        """
-        self.vault_addr: str = url
-        self.vault_role_id: str = role_id
-        self.vault_secret_id: str = secret_id
+    @classmethod
+    def from_vault(
+        cls, *, url: str, role_id: str, secret_id: str, mount_point: str
+    ) -> "Multipass":
+        """Authenticate once and read the password using hvac's 30-second timeout."""
+        prefix = mount_point.strip("/")
+        if not prefix:
+            raise VaultSecretError("Vault mount point must contain a secret path.")
 
-        if not all([self.vault_addr, self.vault_role_id, self.vault_secret_id]):
+        try:
+            client = hvac.Client(url=url)
+            response = client.auth.approle.login(
+                role_id=role_id, secret_id=secret_id, use_token=False
+            )
+        except (HvacError, RequestException):
             raise VaultAuthenticationError(
-                "Vault requires addr, role_id and secret_id "
-                "(set VAULT__ADDR, VAULT__ROLE_ID, VAULT__SECRET_ID)"
-            )
+                "Vault AppRole authentication failed; check connection settings, "
+                "credentials, and AppRole permissions."
+            ) from None
 
-        # Initialize Vault client
-        self.client: hvac.Client = hvac.Client(url=self.vault_addr)
-        self._authenticate()
+        auth = response.get("auth") if isinstance(response, dict) else None
+        token = auth.get("client_token") if isinstance(auth, dict) else None
+        if not isinstance(token, str) or not token:
+            raise VaultAuthenticationError(
+                "Vault returned a malformed authentication response; "
+                "expected a nonempty client token from AppRole login."
+            ) from None
+        client.token = token
 
-        # Start token renewal process
-        self._token_expires_at: Optional[int] = None  # Will be set during authentication
-
-        logger.info("Vault client initialized successfully")
-
-    def _authenticate(self) -> None:
-        """Authenticate with Vault using AppRole."""
         try:
-            auth_response: Dict[str, Any] = self.client.auth.approle.login(
-                role_id=self.vault_role_id,
-                secret_id=self.vault_secret_id
-            )
+            response = client.read(f"{prefix}/password")
+        except InvalidPath:
+            raise VaultSecretError(
+                "Vault database secret was not found; check the configured "
+                "mount point and password path."
+            ) from None
+        except (HvacError, RequestException):
+            raise VaultSecretError(
+                "Vault database secret read failed; check connectivity "
+                "and read permissions for the configured password path."
+            ) from None
 
-            # Store token expiry for renewal
-            if 'lease_duration' in auth_response['auth']:
-                self._token_expires_at = auth_response['auth']['lease_duration']
-
-            logger.debug("Successfully authenticated with Vault")
-        except Exception as e:
-            logger.error(f"Failed to authenticate with Vault: {str(e)}")
-            raise VaultAuthenticationError(f"Failed to authenticate with Vault: {str(e)}")
-
-    @handle_vault_errors
-    def get_secret(self, path: str, key: Optional[str] = None) -> Any:
-        """Retrieve a secret from Vault.
-
-        Args:
-            path: Path to the secret in Vault
-            key: Optional specific key to retrieve from the secret
-
-        Returns:
-            The secret value or dict of values
-
-        Raises:
-            VaultSecretError: If the secret cannot be retrieved
-        """
-        try:
-            response: Dict[str, Any] = self.client.read(path)
-
-            if not response or 'data' not in response:
-                raise VaultSecretError(f"No secret found at {path}")
-
-            if key:
-                if key not in response['data']:
-                    raise VaultSecretError(f"Key '{key}' not found in secret at {path}")
-                return response['data'][key]
-
-            return response['data']
-        except hvac.exceptions.InvalidPath:
-            raise VaultSecretError(f"Secret not found at path: {path}")
-
-    @handle_vault_errors
-    def list_secrets(self, path: str) -> List[str]:
-        """List secrets at a given path.
-
-        Args:
-            path: Path in Vault to list
-
-        Returns:
-            List of secret names
-        """
-        try:
-            response: Dict[str, Any] = self.client.list(path)
-            if not response or 'data' not in response or 'keys' not in response['data']:
-                return []
-            return response['data']['keys']
-        except hvac.exceptions.InvalidPath:
-            return []
-
-    def is_authenticated(self) -> bool:
-        """Check if the client is authenticated with Vault."""
-        return self.client.is_authenticated()
+        if response is None:
+            raise VaultSecretError(
+                "Vault database secret was not found; check the configured "
+                "mount point and password path."
+            ) from None
+        data = response.get("data") if isinstance(response, dict) else None
+        if (
+            isinstance(data, dict)
+            and "password" not in data
+            and "value" not in data
+            and "data" in data
+        ):
+            metadata = data.get("metadata")
+            version = metadata.get("version") if isinstance(metadata, dict) else None
+            if type(version) is not int or version < 1:
+                raise VaultSecretError(
+                    "Vault returned a malformed KV v2 response. "
+                    "Expected metadata identifying a positive secret version."
+                ) from None
+            data = data["data"]
+        if not isinstance(data, dict):
+            raise VaultSecretError(
+                "Vault returned a malformed secret response; "
+                "expected a KV v1 or KV v2 data object."
+            ) from None
+        if "password" not in data and "value" not in data:
+            raise VaultSecretError(
+                "Vault database secret is missing the password field; "
+                "provide password or the legacy value field."
+            ) from None
+        password = data["password"] if "password" in data else data["value"]
+        return cls(db_password=password)

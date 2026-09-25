@@ -9,9 +9,17 @@ import os
 import sys
 from typing import Any
 
-from gonzo_pit_strategy.config.config import AppConfig, setup_logging
+from pydantic import ValidationError
+from pydantic_settings import SettingsError
+
+from gonzo_pit_strategy.config.config import (
+    AppConfig,
+    GenerateDefaultSettings,
+    setup_logging,
+)
 from gonzo_pit_strategy.db.connection_pool import ConnectionPool
 from gonzo_pit_strategy.db.run_ledger import PostgresRunLedger
+from gonzo_pit_strategy.security import VaultError
 from gonzo_pit_strategy.training.artifact import ArtifactStore
 from gonzo_pit_strategy.training.config import TrainingConfig
 from gonzo_pit_strategy.training.data import DatabaseDataSource
@@ -32,9 +40,6 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def main():
     """Main entry point for the training CLI."""
-    app_config = AppConfig()
-    setup_logging(app_config.logging)
-
     parser = argparse.ArgumentParser(
         description="Train a model for F1 pit strategy prediction"
     )
@@ -51,16 +56,22 @@ def main():
 
     args = parser.parse_args()
 
-    # Generating a template needs no database, so this runs before the pool.
     if args.generate_default:
         config = TrainingConfig()
-        output_dir = app_config.paths.experiments_dir
+        output_dir = GenerateDefaultSettings().paths.experiments_dir
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "training_config_default.json")
         with open(output_path, "w") as f:
             f.write(config.model_dump_json(indent=2))
-        logger.info(f"Default config written to {output_path}")
+        print(f"Default config written to {output_path}")
         return
+
+    try:
+        app_config = AppConfig()  # pyright: ignore[reportCallIssue]
+    except (VaultError, ValidationError, SettingsError) as exc:
+        print(f"Invalid settings: {exc}", file=sys.stderr)
+        sys.exit(1)
+    setup_logging(app_config.logging)
 
     try:
         config_dict = {}
