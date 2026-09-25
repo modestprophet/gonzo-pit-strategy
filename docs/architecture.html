@@ -198,7 +198,7 @@ aside h4 {
         {
           "id": "cli.train", "name": "cli/train.py", "layer": "entry", "path": "src/gonzo_pit_strategy/cli/train.py",
           "role": "gonzo-train: hydrate config, wire adapters, run",
-          "purpose": "The entry point owns the wiring (ADR 0001): it builds AppConfig, the ConnectionPool, the DatabaseDataSource, the ArtifactStore and the PostgresRunLedger, and injects them into an Experiment or a Sweep. Nothing downstream constructs its own collaborators, which is why tests can drive a real Experiment with a temp directory and an in-memory ledger.",
+          "purpose": "The entry point owns the wiring: it builds AppConfig, the ConnectionPool, the DatabaseDataSource, the ArtifactStore and the PostgresRunLedger, and injects them into an Experiment or a Sweep. Tests can drive a real Experiment with a temp directory and an in-memory ledger.",
           "expects": "--config PATH (a TrainingConfig JSON), or --grid-search PATH on top of it, or --generate-default",
           "produces": "log lines with run id, model version and test loss. Under --grid-search, every outcome and its configuration, plus requested, succeeded and failed counts. Exit 1 on an invalid request or any failed Experiment, otherwise 0.",
           "symbols": [
@@ -213,18 +213,18 @@ aside h4 {
           "id": "ext.dbt", "name": "dbt build", "layer": "entry", "kind": "external", "path": "dbt/",
           "role": "the third program: raw tables to training dataset",
           "purpose": "A separate dbt project with its own authentication through dbt/profiles.yml and the F1DB_HOST, F1DB_USER, F1DB_PASSWORD variables. It never sees AppConfig. It reads f1db.* and materializes f1db_staging, f1db_intermediate and f1db_features as views and f1db_ml_prep as tables, creating those schemas on first run, which is why the App Role needs CREATE ON DATABASE. The dbt lineage tab draws the models.",
-          "expects": "f1db.* loaded, dbt deps run, the three F1DB_* variables exported",
-          "produces": "f1db_ml_prep.prep_training_dataset, 25,873 rows by 408 columns, plus prep_scaling_params and prep_category_mappings",
+          "expects": "f1db.* loaded, dbt deps run, F1DB_USER and F1DB_PASSWORD exported, and optionally F1DB_HOST",
+          "produces": "f1db_ml_prep.prep_training_dataset, plus prep_scaling_params and prep_category_mappings",
           "notes": [
             "profiles.yml hardcodes port 5432 and dbname f1db; only host, user and password are parameterized.",
-            "dbt build drops and recreates everything in its four schemas. Derived data only, never f1db.*, but readers of those tables see them vanish mid-build."
+            "dbt build rebuilds the selected models and runs their tests. It does not drop the four schemas or modify the source tables in f1db.*."
           ]
         },
 
         {
           "id": "training.runner", "name": "training/runner.py", "layer": "orch", "path": "src/gonzo_pit_strategy/training/runner.py",
           "role": "Experiment: load, build, fit, evaluate, save, mirror",
-          "purpose": "One training lifecycle as straight-line code. The order is the contract: train, then evaluate, then write the Artifact from the model those metrics were measured on, then mirror to the database. Expressed as on_train_end callbacks this ordering once depended on list position against EarlyStopping's weight restore and silently produced an Artifact the reported metrics did not describe (ADR 0002). The ArtifactStore and the Run Ledger are injected, so a test drives a real Experiment with no patching.",
+          "purpose": "One training lifecycle as straight-line code. The order is the contract: train, then evaluate, then write the Artifact from the model those metrics were measured on, then mirror to the database. Evaluation and saving run after model.fit returns, including EarlyStopping's weight restore when enabled. The ArtifactStore and the Run Ledger are injected, so a test drives a real Experiment with no patching.",
           "expects": "a TrainingConfig, a TrainingDataSource, an ArtifactStore, a RunLedger, and PathsConfig",
           "produces": "an ExperimentResult, models/artifacts/<version>/, TensorBoard logs, and the rows the Run Ledger writes",
           "symbols": [
@@ -262,7 +262,7 @@ aside h4 {
           "expects": "a DatabaseTarget, an Admin Role and an App Role, and for Load a directory holding every file in the Load Plan",
           "produces": "a ProvisionReport listing the phases that ran and, after a Load, rows written per table",
           "symbols": [
-            {"name": "LOAD_PLAN", "sig": "((csv, table), ...) x 18", "note": "Jolpica CSV files and their target tables in foreign-key order: round_entries references rounds, laps reference session_entries. Domain knowledge, not configuration, and not alphabetical. Every entry is required; dbt's lineage needs all of them, and a partial load builds cleanly while being silently wrong."},
+            {"name": "LOAD_PLAN", "sig": "((csv, table), ...) x 18", "note": "Jolpica CSV files and their target tables in foreign-key order: round_entries references rounds, laps reference session_entries. Every entry is required by the loader, though dbt directly reads only 11 of these tables."},
             {"name": "parse_steps", "sig": "(raw) -> list[Step]", "note": "Splits and normalizes command-line names, expands all, then applies shared selection validation. An empty selection fails. Unknown names fail even beside all. Duplicate and reversed names select phases rather than specifying an execution sequence."},
             {"name": "_normalize_steps", "sig": "(steps) -> list[Step]", "note": "Validates the complete selection, removes duplicates, and returns Init, Migrate, Load order. Both parse_steps and provision use it, so direct callers do not need the text parser to get these guarantees."},
             {"name": "_REQUIRED_ROLES", "sig": "{Step: role names}", "note": "The shared phase policy. Init requires Admin Role and App Role, Migrate requires only Admin Role, and Load requires only App Role."},
@@ -283,23 +283,22 @@ aside h4 {
           "notes": [
             "Preflight checks phase selection, required credential fields, and the presence of a Load directory argument. It does not check all phases' files before starting. Init or Migrate may already have completed when Load discovers a missing CSV.",
             "tests/test_provisioning_preflight.py covers direct requests and standalone phases. tests/test_load_cli.py exercises the real CLI entry point and verifies invalid requests cannot reach subprocess or database calls. tests/test_provisioning.py retains real-Postgres phase checks, including reversed and repeated selections.",
-            "A correct load puts about 665k rows in laps, 48k in session_entries and 27k in round_entries. base_teams and penalties load zero rows because their Jolpica CSVs are header-only.",
-            "Against a production snapshot the Load phase must be skipped: it is a bare COPY with no ON CONFLICT. See docs/E2E_FROM_PROD_SNAPSHOT.md."
+            "Against an already-loaded snapshot the Load phase must be skipped: it is a bare COPY with no ON CONFLICT."
           ]
         },
 
         {
           "id": "training.data", "name": "training/data.py", "layer": "seam", "path": "src/gonzo_pit_strategy/training/data.py",
           "role": "TrainingDataSource, the fingerprint, and prepare_features",
-          "purpose": "The seam at which a RawDataset enters the training pipeline, plus the two functions that define what the model's input means. fingerprint_dataset identifies a DatasetVersion by content. prepare_features is the value-encoding half of the model's input contract: the Artifact Manifest fixes which columns and in what order, this fixes how their values are encoded, and both training and inference call it. Applying it in only one place is train/serve skew, which bit this project once (ADR 0002).",
-          "expects": "any object with a dataset_name property and a fetch_raw_data method; in production a SQLAlchemy Engine",
+          "purpose": "The seam at which a RawDataset enters the training pipeline, plus the two functions that define what the model's input means. fingerprint_dataset identifies a DatasetVersion by content. The Artifact Manifest fixes which columns the model expects and in what order. prepare_features encodes their values for both training and inference.",
+          "expects": "any object with a dataset_name property and a fetch_raw_data method; the DatabaseDataSource adapter takes a SQLAlchemy Engine",
           "produces": "LoadedData: six numpy splits, feature_names in training order, and a DatasetProvenance",
           "adapters": ["training.data", "tests.conftest"],
           "symbols": [
             {"name": "TrainingDataSource", "sig": "Protocol", "note": "dataset_name and fetch_raw_data(). The source names itself because it knows what the data is; the fingerprint says which revision."},
             {"name": "DatabaseDataSource", "sig": "class(engine, *, query=None, dataset_name=None)", "note": "The live adapter. Default query is SELECT * FROM f1db_ml_prep.prep_training_dataset, default name prep_training_dataset. A caller-supplied query gets a name derived from its hash, because dataset_versions is unique on (dataset_name, version) and two different datasets filed under one name collide there. Stashes the query in df.attrs['source_query'] for the fingerprint."},
             {"name": "fingerprint_dataset", "sig": "(df, query='') -> str", "note": "sha256 over the query text, the row count, every column name and dtype, and the summed pandas row hash. Same data, same fingerprint, with no cooperation from dbt. Collation-dependent by way of column order: see the notes."},
-            {"name": "prepare_features", "sig": "(df) -> df", "note": "Object columns coerced to numeric (Postgres returns object for all-NULL numerics), every boolean column cast to int (the dbt one-hot columns), NaN filled with 0. Keys off dtype, not column-name prefix, so adding a one-hot family in dbt needs no Python change."},
+            {"name": "prepare_features", "sig": "(df) -> df", "note": "Object columns coerced to numeric, every boolean column cast to int, NaN filled with 0. Keys off dtype, not column-name prefix. The current dbt one-hot expressions already return integer 0 or 1."},
             {"name": "load_training_data", "sig": "(config, data_source) -> LoadedData", "note": "Fetch, fingerprint the raw frame before any transformation, prepare_features, drop the target and exclude_columns, then two train_test_split calls (test first, then validation sized relative to what is left) with config.random_state."},
             {"name": "DatasetProvenance", "sig": "frozen dataclass", "note": "name, fingerprint, record_count, feature_count. One value travels from the source into both the Artifact Manifest and the Run Ledger, so the two cannot describe different data."},
             {"name": "LoadedData", "sig": "dataclass", "note": "X_train, X_val, X_test, y_train, y_val, y_test, feature_names, provenance."}
@@ -312,18 +311,18 @@ aside h4 {
         {
           "id": "training.ledger", "name": "training/ledger.py", "layer": "seam", "path": "src/gonzo_pit_strategy/training/ledger.py",
           "role": "RunLedger: everything the database records about a Training Run",
-          "purpose": "The interface only, in training's own vocabulary: Artifact Manifest, Dataset Provenance, epoch metrics. It imports nothing from db, so the dependency runs one way and the Postgres adapter imports these types rather than the reverse. The interface is a context manager because a Training Run has an invariant otherwise enforced only by discipline: it always reaches a terminal status. Leaving the block, by return or by exception, closes the run.",
+          "purpose": "The interface only, in training's own vocabulary: Artifact Manifest, Dataset Provenance, epoch metrics. It imports nothing from db, so the dependency runs one way and the Postgres adapter imports these types rather than the reverse. The context manager handles completion and ordinary exceptions. Recording failure is best effort, so an unavailable database or an interrupted process can leave a run RUNNING.",
           "expects": "a TrainingConfig to open a run; then epoch logs and, once, a manifest, an artifact path and a provenance",
           "produces": "a RunRecorder for the duration of the block",
           "adapters": ["db.run_ledger", "tests.fakes"],
           "symbols": [
             {"name": "RunLedger", "sig": "Protocol", "note": "run(config, *, environment) -> ContextManager[RunRecorder]. The row is written before the block body starts, so the run is visible as RUNNING while training is in progress."},
-            {"name": "RunRecorder", "sig": "Protocol", "note": "run_id (available inside the block, for correlating logs), model_id (None until complete; ADR 0002 rejects placeholder rows), record_epoch(epoch, logs), complete(manifest, artifact_path, provenance, *, epochs_completed, config_source_path)."},
+            {"name": "RunRecorder", "sig": "Protocol", "note": "run_id (available inside the block, for correlating logs), model_id (None until complete), record_epoch(epoch, logs), complete(manifest, artifact_path, provenance, *, epochs_completed, config_source_path)."},
             {"name": "split_metric", "sig": "(name) -> (metric_name, split_type)", "note": "A val_ prefix means VALIDATION, everything else TRAIN. One implementation beside the docstring that specifies it, so the two adapters cannot drift on this rule again."},
             {"name": "TRAIN, VALIDATION, TEST", "sig": "str", "note": "Exactly the values the CHECK constraint on training_metrics.split_type allows."}
           ],
           "notes": [
-            "tests/test_run_ledger_contract.py runs one suite against both adapters. On its first run six assertions failed against the in-memory fake and none against Postgres; the fake was corrected to match."
+            "tests/test_run_ledger_contract.py runs one suite against both adapters."
           ]
         },
         {
@@ -337,7 +336,7 @@ aside h4 {
             {"name": "ArtifactStore.save", "sig": "(model, manifest) -> Path", "note": "Reject an occupied version, write model.keras and manifest.json in a unique .gonzo-stage-* directory, then publish the directory atomically. FileExistsError rejects empty directories, files, symlinks, and identical retries. The kernel checks occupancy again at publication time. TemporaryDirectory cleans unpublished files on catchable failures, including KeyboardInterrupt."},
             {"name": "_rename_noreplace", "sig": "(source, destination) -> None", "note": "Private ctypes binding to Linux renameat2 with RENAME_NOREPLACE. The complete staging directory becomes the final version in one operation. Missing native support or filesystem errors propagate without an ordinary-rename fallback. The binding is initialized only when saving."},
             {"name": "ArtifactStore.load_manifest", "sig": "(version) -> ArtifactManifest", "note": "Read the existing manifest format without loading the model or requiring native publication support. Reject resolved paths into staging, including symlink aliases."},
-            {"name": "ArtifactStore.load", "sig": "(version) -> (keras.Model, ArtifactManifest)", "note": "Read the manifest, then call keras.models.load_model. Both file paths must be outside staging. Historical timestamp-named Artifacts and ordinary symlink aliases remain loadable. A directory without a manifest fails with the ADR 0002 compatibility message."},
+            {"name": "ArtifactStore.load", "sig": "(version) -> (keras.Model, ArtifactManifest)", "note": "Read the manifest, then call keras.models.load_model. Both file paths must be outside staging. Historical timestamp-named Artifacts and ordinary symlink aliases remain loadable. A directory without a manifest raises FileNotFoundError."},
             {"name": "ArtifactStore.path_for", "sig": "(version) -> Path", "note": "Validate a single nonempty directory name and join it to the configured root. Reject traversal, the reserved .gonzo-stage- prefix, and roots inside staging. Old versions do not have to contain UUIDs."},
             {"name": "ArtifactStore.delete", "sig": "(version) -> bool", "note": "Explicit deletion removes the Artifact directory and returns False if it is absent. It does not collect abandoned staging. Concurrent deletion is outside the publication contract."}
           ],
@@ -391,7 +390,7 @@ aside h4 {
         {
           "id": "training.config", "name": "training/config.py", "layer": "contract", "path": "src/gonzo_pit_strategy/training/config.py",
           "role": "TrainingConfig and the polymorphic ModelConfig",
-          "purpose": "Pydantic models for one training run. The model field is a discriminated union on a Literal type: dense or bilstm today. Adding an architecture is a new config class here plus a builder in model_factory. Imports nothing from the package, and it must stay that way because AppConfig embeds it.",
+          "purpose": "Pydantic models for one training run. The model field is a union of DenseModelConfig and BiLSTMModelConfig, each with a Literal type field. Adding an architecture is a new config class here plus a builder in model_factory. Imports nothing from the package, and it must stay that way because AppConfig embeds it.",
           "expects": "a JSON object, or nothing for the defaults",
           "produces": "a validated TrainingConfig. TrainingConfig and both model configs reject unknown fields and invalid numeric or split values before training starts.",
           "symbols": [
@@ -429,7 +428,7 @@ aside h4 {
         {
           "id": "inference.predictor", "name": "inference/predictor.py", "layer": "contract", "path": "src/gonzo_pit_strategy/inference/predictor.py",
           "role": "ModelPredictor: rehydrate from the Artifact, predict on raw rows",
-          "purpose": "The point of ADR 0002. The Artifact Manifest supplies the feature-ordering contract, so no database connection is required. predict on a DataFrame reorders columns to feature_names and applies prepare_features, so a raw slice of prep_training_dataset works directly. Copy the artifact directory and it carries everything required.",
+          "purpose": "The Artifact Manifest supplies the feature-ordering contract, so no database connection is required. predict on a DataFrame reorders columns to feature_names and applies prepare_features, so a raw slice of prep_training_dataset works directly. Copy the artifact directory and it carries the model and its input contract.",
           "expects": "a model version and a PathsConfig, then a DataFrame or an already-ordered numpy array",
           "produces": "np.ndarray of predictions",
           "symbols": [
@@ -442,7 +441,7 @@ aside h4 {
         {
           "id": "config", "name": "config/config.py", "layer": "config", "path": "src/gonzo_pit_strategy/config/config.py",
           "role": "AppConfig: the one declared tree, hydrated at startup",
-          "purpose": "Every setting the application needs, in one file (ADR 0001). Environment variables map onto the tree with __ as the nesting delimiter, so AppConfig.db.host is DB__HOST; a single underscore matches no field and is silently dropped. Nothing under config/ or security/ reads os.environ. Vault is a settings source, optional, resolved during hydration rather than deferred until use.",
+          "purpose": "Application settings are grouped in AppConfig. Environment variables map onto nested fields with __ as the delimiter, so AppConfig.db.host is DB__HOST. DB_HOST matches no field and is ignored. Nothing under config/ or security/ reads os.environ. Vault is an optional settings source, resolved when AppConfig is built.",
           "expects": "constructor kwargs, the environment, .env, and optionally Vault",
           "produces": "AppConfig with db, logging, paths, training and vault submodels",
           "symbols": [
@@ -473,7 +472,7 @@ aside h4 {
         {
           "id": "db.pool", "name": "db/connection_pool.py", "layer": "db", "path": "src/gonzo_pit_strategy/db/connection_pool.py",
           "role": "ConnectionPool: an Engine and a session factory, built once by the entry point",
-          "purpose": "SQLAlchemy engine with QueuePool from a DatabaseConfig. Instantiated explicitly by the entry point and passed down; there is no module-level singleton and no init_db, which is the pattern ADR 0001 rejects.",
+          "purpose": "SQLAlchemy engine with QueuePool from a DatabaseConfig. Instantiated explicitly by the entry point and passed down. There is no module-level singleton or init_db.",
           "expects": "a DatabaseConfig",
           "produces": "engine, get_session(), dispose()",
           "symbols": [
@@ -506,7 +505,7 @@ aside h4 {
         {
           "id": "db.schema", "name": "db/init_db.sql + migrations/", "layer": "db", "path": "src/gonzo_pit_strategy/db/",
           "role": "the SQL that Provisioning drives",
-          "purpose": "init_db.sql is a template with quoted-placeholder substitution: it creates the database, the schema, the App Role, and the grants, including CREATE ON DATABASE so dbt can make its own schemas. The five goose migrations create the ledger tables, the 18 Jolpica tables, and the ADR 0002 changes.",
+          "purpose": "init_db.sql is a template with quoted-placeholder substitution: it creates the database, the schema, the App Role, and the grants, including CREATE ON DATABASE so dbt can make its own schemas. The five goose migrations define the ledger tables and the 18 Jolpica tables, add artifact_path, allow runs without model_id, and remove unused schema.",
           "expects": "rendering by render_init_sql; goose with the schema-qualified version table",
           "produces": "f1db.* and f1db.goose_db_version",
           "symbols": [
@@ -528,14 +527,14 @@ aside h4 {
         {
           "id": "ext.f1db", "name": "Postgres f1db.*", "layer": "ext", "kind": "external",
           "role": "raw tables plus the ledger tables, one database",
-          "purpose": "PostgreSQL 17 on Debian/glibc, in dev and prod both. The 18 Jolpica tables that Provisioning fills, the four ledger tables the Run Ledger writes, and goose_db_version. Two roles: the Admin Role that creates and migrates, the App Role that owns data and runs dbt and training.",
+          "purpose": "The 18 Jolpica tables that Provisioning fills, the four ledger tables the Run Ledger writes, and goose_db_version. Two roles: the Admin Role creates and migrates, and the App Role loads data and runs dbt and training.",
           "expects": "-", "produces": "-",
           "notes": ["Version and libc must match between any two databases whose fingerprints you intend to compare. Never substitute an Alpine image."]
         },
         {
           "id": "ext.mlprep", "name": "f1db_ml_prep.prep_training_dataset", "layer": "ext", "kind": "external",
           "role": "what training reads",
-          "purpose": "The dbt output table: 25,873 rows by 408 columns, scaled numerics plus three one-hot families, target finish_position. Contains object-dtype columns (all-NULL numerics) and boolean one-hot columns, which is exactly what prepare_features exists for. Rebuilt from scratch on every dbt build.",
+          "purpose": "The dbt output table: scaled numerics plus three integer one-hot families, target finish_position. All-NULL numerics can arrive in pandas as object columns. prepare_features converts these for Keras. Rebuilt when selected by dbt build.",
           "expects": "-", "produces": "a RawDataset"
         },
         {
@@ -565,7 +564,7 @@ aside h4 {
         {
           "id": "ext.vault", "name": "HashiCorp Vault", "layer": "ext", "kind": "external",
           "role": "optional password source",
-          "purpose": "Reached only through Multipass, only when VAULT__ADDR, VAULT__ROLE_ID and VAULT__SECRET_ID are all set. Supplies DatabaseConfig.password from <mount_point>/password. Unverified against prod as of the E2E doc.",
+          "purpose": "Reached through Multipass when VaultConfig.addr, role_id and secret_id are all set. Supplies DatabaseConfig.password from <mount_point>/password.",
           "expects": "AppRole credentials", "produces": "secret data"
         },
         {
@@ -627,18 +626,18 @@ aside h4 {
         {"id": "src",   "label": "Sources: f1db.* (11 of the 18 Jolpica tables)"},
         {"id": "stg",   "label": "Staging: f1db_staging, views"},
         {"id": "int",   "label": "Intermediate: f1db_intermediate, view"},
-        {"id": "feat",  "label": "Features: f1db_features, views, dataset-level feature engineering (ADR 0003)"},
+        {"id": "feat",  "label": "Features: f1db_features, views, dataset-level feature engineering"},
         {"id": "prep",  "label": "ML prep: f1db_ml_prep, tables"},
         {"id": "py",    "label": "Consumer"},
         {"id": "macro", "label": "Macros: dbt/macros/, 42 lines of SQL in total"}
       ],
       "nodes": [
-        {"id": "dbt.src.session_entries", "name": "session_entries", "layer": "src", "kind": "external", "small": true, "role": "results per session", "purpose": "One row per driver per session: grid, position, status, laps, points, time, fastest_lap_rank. About 48k rows.", "path": "f1db.session_entries"},
+        {"id": "dbt.src.session_entries", "name": "session_entries", "layer": "src", "kind": "external", "small": true, "role": "results per session", "purpose": "Results linked to a round entry and session: grid, position, status, laps, points, time, fastest_lap_rank.", "path": "f1db.session_entries"},
         {"id": "dbt.src.sessions", "name": "sessions", "layer": "src", "kind": "external", "small": true, "role": "R, Q1, Q2, Q3, QB, practice", "purpose": "Session metadata. Every staging model filters on s.type, R for races and Q1/Q2/Q3/QB for qualifying.", "path": "f1db.sessions"},
         {"id": "dbt.src.rounds", "name": "rounds", "layer": "src", "kind": "external", "small": true, "role": "Grand Prix weekends", "purpose": "date, number, circuit_id, is_cancelled. Cancelled rounds are excluded in staging.", "path": "f1db.rounds"},
         {"id": "dbt.src.seasons", "name": "seasons", "layer": "src", "kind": "external", "small": true, "role": "year", "purpose": "Season year, joined onto every race result.", "path": "f1db.seasons"},
         {"id": "dbt.src.circuits", "name": "circuits", "layer": "src", "kind": "external", "small": true, "role": "circuit name", "purpose": "Supplies circuit_name, which becomes a one-hot family in ml_prep. Its sort order under the server's collation is baked into the dataset's column order.", "path": "f1db.circuits"},
-        {"id": "dbt.src.round_entries", "name": "round_entries", "layer": "src", "kind": "external", "small": true, "role": "driver entries per round", "purpose": "The key qualifying is pivoted on. About 27k rows.", "path": "f1db.round_entries"},
+        {"id": "dbt.src.round_entries", "name": "round_entries", "layer": "src", "kind": "external", "small": true, "role": "driver entries per round", "purpose": "The key qualifying is pivoted on.", "path": "f1db.round_entries"},
         {"id": "dbt.src.team_drivers", "name": "team_drivers", "layer": "src", "kind": "external", "small": true, "role": "driver to team per season", "purpose": "Links a round entry to its driver and team.", "path": "f1db.team_drivers"},
         {"id": "dbt.src.drivers", "name": "drivers", "layer": "src", "kind": "external", "small": true, "role": "abbreviation", "purpose": "Supplies driver_abbreviation, the third one-hot family.", "path": "f1db.drivers"},
         {"id": "dbt.src.teams", "name": "teams", "layer": "src", "kind": "external", "small": true, "role": "team name", "purpose": "Supplies team_name, the second one-hot family.", "path": "f1db.teams"},
@@ -670,11 +669,11 @@ aside h4 {
         {"id": "dbt.feat_dnf_handled", "name": "feat_dnf_handled", "layer": "feat", "path": "dbt/models/features/feat_dnf_handled.sql", "where": "view in f1db_features",
          "role": "is_dnf flag, finish_position filled with 25",
          "purpose": "A NULL finish_position means did not finish: is_dnf = 1 and finish_position_filled = 25. This is the input to feat_lagged, so its (season_year, driver_id, round_number) combination must be unique for the lagged features to be deterministic.",
-         "notes": ["A warn-severity dbt_utils.unique_combination_of_columns test tracks that uniqueness. It reports WARN 83 today: 83 groups in seasons 1950 to 1964 where a driver was entered more than once in a round. When it goes to PASS the fingerprint becomes a usable baseline."]},
+         "notes": ["A warn-severity dbt_utils.unique_combination_of_columns test tracks that uniqueness. Tied groups make the lagged features depend on row order."]},
         {"id": "dbt.feat_lagged", "name": "feat_lagged", "layer": "feat", "path": "dbt/models/features/feat_lagged.sql", "where": "view in f1db_features",
          "role": "previous-race values per driver per season",
          "purpose": "Eight prev_race_* columns via LAG(..., 1) OVER (PARTITION BY season_year, driver_id ORDER BY round_number), COALESCEd to 0 for the first round.",
-         "notes": ["Known limitation, accepted rather than fixed: the window key is not unique for 172 rows in 1950 to 1964 (shared drives), and SQL does not define which tied row LAG returns. Through prep_scaled's AVG/STDDEV_POP OVER() those rows perturb all 25,873 rows of prev_race_points_scaled, prev_race_team_wins_scaled and prev_race_race_time_ms_scaled. Filtering to seasons >= 2008 removes every tied group."]},
+         "notes": ["The window has no tie-breaker for multiple entries by one driver in a round. SQL does not define which tied row LAG returns. Those differences can change the mean and standard deviation used by prep_scaled, affecting an entire scaled column."]},
         {"id": "dbt.feat_season_progress", "name": "feat_season_progress", "layer": "feat", "path": "dbt/models/features/feat_season_progress.sql", "where": "view in f1db_features",
          "role": "fraction of the season elapsed",
          "purpose": "round_number divided by MAX(round_number) OVER (PARTITION BY season_year)."},
@@ -684,10 +683,10 @@ aside h4 {
 
         {"id": "dbt.prep_feature_set", "name": "prep_feature_set", "layer": "prep", "path": "dbt/models/ml_prep/prep_feature_set.sql", "where": "table in f1db_ml_prep",
          "role": "select the training-relevant columns",
-         "purpose": "Drops ids, dates, URLs and raw strings. Keeps three categoricals (circuit_name, team_name, driver_abbreviation), 21 numerics to be scaled, five already-numeric flags and season_progress_percent, and the target finish_position."},
+         "purpose": "Drops ids, dates, URLs and raw strings. Keeps three categoricals (circuit_name, team_name, driver_abbreviation), 21 numerics to be scaled, four already-numeric flags and season_progress_percent, and the target finish_position."},
         {"id": "dbt.prep_scaled", "name": "prep_scaled", "layer": "prep", "path": "dbt/models/ml_prep/prep_scaled.sql", "where": "table in f1db_ml_prep",
          "role": "standardize the 21 numerics",
-         "purpose": "(x - AVG(x) OVER()) / NULLIF(STDDEV_POP(x) OVER(), 0) for each numeric column, producing *_scaled columns. The population statistics come from the whole table, which is why an ambiguity in 172 rows of feat_lagged reaches every row here."},
+         "purpose": "(x - AVG(x) OVER()) / NULLIF(STDDEV_POP(x) OVER(), 0) for each numeric column, producing *_scaled columns. The population statistics come from the whole table, so differences in feat_lagged can affect every row here."},
         {"id": "dbt.prep_scaling_params", "name": "prep_scaling_params", "layer": "prep", "path": "dbt/models/ml_prep/prep_scaling_params.sql", "where": "table in f1db_ml_prep",
          "role": "the fitted scaler: mean and stddev per column",
          "purpose": "One row per scaled column with its mean and population stddev, so inference on new raw rows could rescale the same way. Nothing in Python reads it yet: the predictor consumes rows that are already scaled.",
@@ -698,21 +697,21 @@ aside h4 {
         {"id": "dbt.prep_ohe_circuit", "name": "prep_ohe_circuit", "layer": "prep", "path": "dbt/models/ml_prep/prep_ohe_circuit.sql", "where": "table in f1db_ml_prep",
          "role": "one-hot circuit_name (1 of 3)",
          "purpose": "A compile-time run_query('SELECT DISTINCT circuit_name ... ORDER BY circuit_name') drives a Jinja loop that emits one CASE WHEN column per circuit, named circuit_<clean_column_name>. Passes every other column through explicitly and drops circuit_name.",
-         "notes": ["That ORDER BY is what makes the dataset's column order collation-dependent: nürburgring and österreichring sort differently under glibc and musl. Running the identical build on Alpine once shifted 123 of 408 columns."]},
+         "notes": ["That ORDER BY makes the dataset's column order depend on the database collation."]},
         {"id": "dbt.prep_ohe_team", "name": "prep_ohe_team", "layer": "prep", "path": "dbt/models/ml_prep/prep_ohe_team.sql", "where": "table in f1db_ml_prep",
          "role": "one-hot team_name (2 of 3)",
          "purpose": "Same pattern as the circuit model, using dbt_utils.star(except team_name) to pass the rest through."},
         {"id": "dbt.prep_ohe_driver", "name": "prep_ohe_driver", "layer": "prep", "path": "dbt/models/ml_prep/prep_ohe_driver.sql", "where": "table in f1db_ml_prep",
          "role": "one-hot driver_abbreviation (3 of 3)",
-         "purpose": "Same pattern again, the last categorical. After this every column is numeric or boolean."},
+         "purpose": "Same pattern again, the last categorical. After this every column is numeric."},
         {"id": "dbt.prep_training_dataset", "name": "prep_training_dataset", "layer": "prep", "path": "dbt/models/ml_prep/prep_training_dataset.sql", "where": "table in f1db_ml_prep",
          "role": "SELECT * FROM prep_ohe_driver: the table training reads",
-         "purpose": "The final materialization. 25,873 rows by 408 columns as of the 2026-01 export. The one-hot columns arrive in pandas as bool and the all-NULL numerics as object, which prepare_features converts on both the training and the inference path.",
-         "notes": ["Tests: finish_position not_null and in [1, 40].", "dbt build reports PASS=36 WARN=1 ERROR=0 on a good run; the one warning is the feat_dnf_handled uniqueness test."]},
+         "purpose": "The final materialization. Row count and one-hot column count depend on the loaded data. The one-hot columns are integers. All-NULL numerics can arrive in pandas as object, which prepare_features converts on both the training and the inference path.",
+         "notes": ["Tests: finish_position not_null and in [1, 40]."]},
 
         {"id": "dbt.py.data_source", "name": "DatabaseDataSource", "layer": "py", "goto": "training.data", "path": "src/gonzo_pit_strategy/training/data.py",
          "role": "SELECT * FROM f1db_ml_prep.prep_training_dataset",
-         "purpose": "Where the dbt lineage hands over to Python. Everything above this line defines the dataset and is covered by the Dataset Fingerprint; everything below it is model-level encoding that inference must repeat. That is the seam ADR 0003 draws: not SQL versus Python, but does the predictor have to do this too? Click through to the module."},
+         "purpose": "Where the dbt lineage hands over to Python. The fingerprint covers the resulting dataset. prepare_features then encodes values for the model, and inference repeats that encoding. Click through to the module."},
 
         {"id": "dbt.macro.lap", "name": "convert_lap_time_to_seconds", "layer": "macro", "small": true, "path": "dbt/macros/convert_lap_time_to_seconds.sql", "role": "M:SS.fff to seconds", "purpose": "Regex-guarded SPLIT_PART arithmetic; NULL, '0:00.000' and anything unparseable become 0.0."},
         {"id": "dbt.macro.race", "name": "convert_race_time_to_ms", "layer": "macro", "small": true, "path": "dbt/macros/convert_race_time_to_ms.sql", "role": "H:MM:SS.fff, M:SS.fff or bare seconds to ms", "purpose": "Three regex branches for the three formats Jolpica uses; the rest become 0.0."},
@@ -774,7 +773,7 @@ aside h4 {
          "note": "resolve_load_plan refuses a directory missing any of the 18 files. Then COPY FROM STDIN per table through psycopg2, so a failure raises instead of exiting 0, and the whole plan rolls back. Skip this phase against a snapshot: it is a bare COPY with no ON CONFLICT."},
         {"step": "5", "label": "Print the report", "module": "cli.load", "calls": [], "tag": "",
          "writes": ["rows per table and a total on stdout", "exit 0"],
-         "note": "A correct load is about 665k laps, 48k session_entries and 27k round_entries. All-zero counts with a success message was a real failure mode; the row counts are the check that means something."}
+         "note": "The report contains the row count returned by COPY for each table and their total. Expected counts depend on the supplied CSV files."}
       ]
     },
     {
@@ -793,13 +792,13 @@ aside h4 {
          "note": "The join, the null fills and the numeric casts that the old pandas pipeline did in its first two steps."},
         {"step": "3", "label": "Features", "module": "dbt.feat_time_converted", "calls": ["dbt.feat_dnf_handled", "dbt.feat_lagged", "dbt.feat_season_progress", "dbt.feat_clipped"], "tag": "views",
          "writes": ["f1db_features.*"],
-         "note": "Time conversion, DNF handling, lagging, season progress, clipping. Dataset-level feature engineering lives here by decision (ADR 0003): inference never repeats it, it receives rows that already have it."},
+         "note": "Time conversion, DNF handling, lagging, season progress, clipping. The predictor receives rows with these features already computed."},
         {"step": "4", "label": "ML prep", "module": "dbt.prep_feature_set", "calls": ["dbt.prep_scaled", "dbt.prep_ohe_circuit", "dbt.prep_ohe_team", "dbt.prep_ohe_driver", "dbt.prep_training_dataset"], "tag": "tables",
-         "writes": ["f1db_ml_prep.prep_training_dataset, 25,873 x 408", "prep_scaling_params", "prep_category_mappings"],
-         "note": "Column selection, standardization, then three one-hot passes whose column lists are generated at compile time by run_query. The final table is what DatabaseDataSource reads. Everything in the four dbt schemas is dropped and recreated on every build."},
+         "writes": ["f1db_ml_prep.prep_training_dataset", "prep_scaling_params", "prep_category_mappings"],
+         "note": "Column selection, standardization, then three one-hot passes whose column lists are generated at compile time by run_query. The final table is what DatabaseDataSource reads. Selected ML prep models are rebuilt as tables."},
         {"step": "5", "label": "Tests", "module": "dbt.feat_dnf_handled", "calls": ["dbt.prep_training_dataset"], "tag": "",
          "writes": [],
-         "note": "Expect PASS=36 WARN=1 ERROR=0. The one warning is the uniqueness test on feat_dnf_handled reporting the 83 pre-1965 shared-drive groups. Any ERROR, or a different warning count, is unexpected."}
+         "note": "dbt build runs tests alongside model builds. The uniqueness test on feat_dnf_handled has warn severity. Pass and warning counts depend on the data and selected models."}
       ]
     },
     {
@@ -815,7 +814,7 @@ aside h4 {
          "note": "TrainingConfig validates the base. For --grid-search, SweepConfig eagerly expands and validates the entire nested grid within the base architecture. Any invalid request exits 1 before wiring execution or starting any Experiment. model.type cannot appear in the grid."},
         {"step": "2", "label": "Wire the adapters", "module": "cli.train", "calls": ["db.pool", "training.data", "training.artifact", "db.run_ledger"], "tag": "app role (DB__*)", "tagclass": "role-app",
          "writes": ["ConnectionPool", "DatabaseDataSource", "ArtifactStore(paths.artifacts_root)", "PostgresRunLedger"],
-         "note": "The entry point builds every collaborator and injects it (ADR 0001). --generate-default returns before this step, so writing a template config needs no database."},
+         "note": "The entry point builds the adapters and passes them to the Experiment or Sweep. --generate-default returns before this step, so writing a template config needs no database."},
         {"step": "3", "label": "Load and fingerprint the data", "module": "training.runner", "calls": ["training.data", "ext.mlprep"], "tag": "reads prep_training_dataset",
           "arrow": "│  ▲ under --grid-search, attempt steps 3 to 10 for each validated config; runtime errors yield a failure and continue with the next config",
          "writes": ["a RawDataset, then its Dataset Fingerprint", "LoadedData: six splits, feature_names in training order, DatasetProvenance"],
@@ -859,7 +858,7 @@ aside h4 {
          "note": "load_predictor(version, AppConfig().paths). Only PathsConfig is needed; no pool, no ledger."},
         {"step": "1", "label": "Rehydrate from disk", "module": "training.artifact", "calls": ["ext.artifacts"], "tag": "reads disk",
          "writes": ["keras.Model", "ArtifactManifest: feature_names, target_column"],
-          "note": "Read the manifest, then load the model. Both paths must be outside the reserved staging namespace, including resolved symlink targets. Historical timestamp-named Artifacts still load without native publication support. Artifacts without manifests fail with the ADR 0002 compatibility message."},
+          "note": "Read the manifest, then load the model. Both paths must be outside the reserved staging namespace, including resolved symlink targets. Historical timestamp-named Artifacts still load without native publication support. Artifacts without manifests raise FileNotFoundError."},
         {"step": "2", "label": "Predict", "module": "inference.predictor", "calls": ["training.data"], "tag": "",
          "writes": ["np.ndarray of predictions"],
          "note": "A DataFrame is checked for every feature column, reordered to feature_names, and passed through the same prepare_features training used. ValueError: Invalid dtype: object here means training and inference have diverged again."}
